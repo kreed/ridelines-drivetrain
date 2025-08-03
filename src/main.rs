@@ -1,6 +1,7 @@
 use clap::Parser;
 use base64::prelude::*;
 use serde::Deserialize;
+use std::env;
 
 #[derive(Parser)]
 struct Cli {
@@ -8,21 +9,26 @@ struct Cli {
     #[arg(short, long)]
     id: String,
 
-    /// API key (from intervals.icu settings page)
-    #[arg(short, long)]
-    api_key: String,
-
     /// The command to run
     command: String,
 }
 
 #[tokio::main]
 async fn main() {
+    dotenv::dotenv().ok();
     let args = Cli::parse();
 
+    let api_key = match env::var("INTERVALS_API_KEY") {
+        Ok(key) => key,
+        Err(_) => {
+            eprintln!("Error: INTERVALS_API_KEY environment variable must be set");
+            std::process::exit(1);
+        }
+    };
+
     match args.command.as_str() {
-        "list" => list_activities(&args.api_key, &args.id).await,
-        "get" => get_activity(&args.api_key, &args.id).await,
+        "list" => list_activities(&api_key, &args.id).await,
+        "get" => get_activity(&api_key, &args.id).await,
         _ => println!("Unknown command: {}", args.command),
     }
 }
