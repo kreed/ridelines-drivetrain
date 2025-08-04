@@ -5,6 +5,9 @@ use std::fs;
 use std::io::BufReader;
 use std::path::{Path, PathBuf};
 use geo::{Point, HaversineDistance};
+use futures::stream::{self, StreamExt};
+use std::sync::{Arc, Mutex};
+use tokio::sync::Semaphore;
 
 pub async fn convert_gpx_directory(directory: &Path) {
     println!("Converting GPX files in directory: {}", directory.display());
@@ -67,35 +70,60 @@ pub async fn convert_gpx_directory(directory: &Path) {
             .progress_chars("#>-"),
     );
 
-    let mut converted_count = 0;
-    let mut error_count = 0;
+    let converted_count = Arc::new(Mutex::new(0));
+    let error_count = Arc::new(Mutex::new(0));
+    
+    // Limit concurrent conversions to avoid overwhelming the system
+    let semaphore = Arc::new(Semaphore::new(4));
+    let pb = Arc::new(pb);
 
-    for gpx_file in files_to_convert {
-        pb.set_message(format!(
-            "Converting {}",
-            gpx_file.file_name().unwrap().to_string_lossy()
-        ));
+    // Process files in parallel
+    stream::iter(files_to_convert)
+        .map(|gpx_file| {
+            let semaphore = semaphore.clone();
+            let pb = pb.clone();
+            let converted_count = converted_count.clone();
+            let error_count = error_count.clone();
 
-        match convert_gpx_to_geojson(gpx_file).await {
-            Ok(_) => {
-                converted_count += 1;
+            async move {
+                let _permit = semaphore.acquire().await.unwrap();
+                
+                pb.set_message(format!(
+                    "Converting {}",
+                    gpx_file.file_name().unwrap().to_string_lossy()
+                ));
+
+                match convert_gpx_to_geojson(gpx_file).await {
+                    Ok(_) => {
+                        if let Ok(mut count) = converted_count.lock() {
+                            *count += 1;
+                        }
+                    }
+                    Err(e) => {
+                        eprintln!("Error converting {}: {}", gpx_file.display(), e);
+                        if let Ok(mut count) = error_count.lock() {
+                            *count += 1;
+                        }
+                    }
+                }
+
+                pb.inc(1);
             }
-            Err(e) => {
-                eprintln!("Error converting {}: {}", gpx_file.display(), e);
-                error_count += 1;
-            }
-        }
-
-        pb.inc(1);
-    }
+        })
+        .buffer_unordered(4)
+        .collect::<Vec<_>>()
+        .await;
 
     pb.finish_with_message("Conversion complete!");
 
+    let final_converted_count = *converted_count.lock().unwrap();
+    let final_error_count = *error_count.lock().unwrap();
+    
     println!("Conversion summary:");
-    println!("  Converted: {converted_count}");
+    println!("  Converted: {final_converted_count}");
     println!("  Skipped (already exists): {skipped_count}");
     println!("  Deleted (orphaned): {deleted_count}");
-    println!("  Errors: {error_count}");
+    println!("  Errors: {final_error_count}");
 }
 
 fn discover_gpx_files(directory: &Path) -> Result<Vec<PathBuf>, Box<dyn std::error::Error>> {

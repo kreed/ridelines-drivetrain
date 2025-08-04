@@ -1,4 +1,5 @@
 use crate::intervals_client::{Activity, DownloadError, IntervalsClient};
+use futures::stream::{self, StreamExt};
 use indicatif::{ProgressBar, ProgressStyle};
 use regex::Regex;
 use sanitize_filename::sanitize;
@@ -6,6 +7,8 @@ use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::io::Write;
 use std::path::Path;
+use std::sync::{Arc, Mutex};
+use tokio::sync::Semaphore;
 
 #[derive(Debug)]
 pub struct DownloadStats {
@@ -87,13 +90,13 @@ pub async fn download_all_activities(api_key: &str, athlete_id: &str, output_dir
             .progress_chars("#>-"),
     );
 
-    let mut stats = DownloadStats {
+    let stats = Arc::new(Mutex::new(DownloadStats {
         downloaded: 0,
         skipped_unchanged: 0,
         skipped_no_gps: HashSet::new(),
         failed: 0,
         deleted: activities_to_delete.len(),
-    };
+    }));
 
     // Delete obsolete activities
     for activity_id in &activities_to_delete {
@@ -101,80 +104,112 @@ pub async fn download_all_activities(api_key: &str, athlete_id: &str, output_dir
             let file_path = output_dir.join(filename);
             if let Err(e) = fs::remove_file(&file_path) {
                 eprintln!("Warning: Failed to delete {filename}: {e}");
-                stats.deleted -= 1;
+                if let Ok(mut stats) = stats.lock() {
+                    stats.deleted -= 1;
+                }
             }
         }
     }
 
-    // Process each activity
-    for activity in activities {
-        pb.set_message(format!("Processing {}", activity.name));
-        
-        // Skip activities without GPS data. We rely on a heuristic here because there isn't any field in the activity list that tells explicitly if an activity has GPS data.
-        let has_distance = activity.distance.unwrap_or(0.0) > 0.0;
-        let is_zwift = activity.name.to_lowercase().contains("zwift");
-        let skip_trainer_activity = activity.trainer == Some(true) && !is_zwift;
-        if !has_distance || skip_trainer_activity {
-            let expected_filename = generate_filename(&activity);
-            stats.skipped_no_gps.insert(expected_filename);
-            pb.inc(1);
-            continue;
-        }
+    // Limit concurrent downloads to avoid overwhelming the server
+    let semaphore = Arc::new(Semaphore::new(8));
+    let pb = Arc::new(pb);
+    let client = Arc::new(client);
+    let output_dir = Arc::new(output_dir.to_path_buf());
+    let existing_files = Arc::new(existing_files);
 
-        let expected_filename = generate_filename(&activity);
-        let file_path = output_dir.join(&expected_filename);
+    // Process activities in parallel
+    stream::iter(activities)
+        .map(|activity| {
+            let semaphore = semaphore.clone();
+            let pb = pb.clone();
+            let stats = stats.clone();
+            let client = client.clone();
+            let output_dir = output_dir.clone();
+            let existing_files = existing_files.clone();
 
-        // Check if we need to download/update this activity
-        let needs_download = if let Some(existing_filename) = existing_files.get(&activity.id) {
-            // File exists, check if metadata has changed
-            existing_filename != &expected_filename
-        } else {
-            // File doesn't exist
-            true
-        };
+            async move {
+                let _permit = semaphore.acquire().await.unwrap();
+                
+                pb.set_message(format!("Processing {}", activity.name));
+                
+                // Skip activities without GPS data
+                let has_distance = activity.distance.unwrap_or(0.0) > 0.0;
+                let is_zwift = activity.name.to_lowercase().contains("zwift");
+                let skip_trainer_activity = activity.trainer == Some(true) && !is_zwift;
+                if !has_distance || skip_trainer_activity {
+                    let expected_filename = generate_filename(&activity);
+                    if let Ok(mut stats) = stats.lock() {
+                        stats.skipped_no_gps.insert(expected_filename);
+                    }
+                    pb.inc(1);
+                    return;
+                }
 
-        if needs_download {
-            // Remove old file if it exists with different name
-            if let Some(existing_filename) = existing_files.get(&activity.id) {
-                let old_path = output_dir.join(existing_filename);
-                let _ = fs::remove_file(old_path);
+                let expected_filename = generate_filename(&activity);
+                let file_path = output_dir.join(&expected_filename);
+
+                // Check if we need to download/update this activity
+                let needs_download = if let Some(existing_filename) = existing_files.get(&activity.id) {
+                    existing_filename != &expected_filename
+                } else {
+                    true
+                };
+
+                if needs_download {
+                    // Remove old file if it exists with different name
+                    if let Some(existing_filename) = existing_files.get(&activity.id) {
+                        let old_path = output_dir.join(existing_filename);
+                        let _ = fs::remove_file(old_path);
+                    }
+
+                    // Download with retry logic handled by middleware
+                    match client.download_gpx(&activity.id, &file_path).await {
+                        Ok(_) => {
+                            if let Ok(mut stats) = stats.lock() {
+                                stats.downloaded += 1;
+                            }
+                        }
+                        Err(DownloadError::Http(status)) if status.as_u16() == 422 => {
+                            if let Ok(mut stats) = stats.lock() {
+                                stats.skipped_no_gps.insert(expected_filename.clone());
+                            }
+                        }
+                        Err(e) => {
+                            eprintln!("Failed to download activity {}: {}", activity.id, e);
+                            if let Ok(mut stats) = stats.lock() {
+                                stats.failed += 1;
+                            }
+                        }
+                    }
+                } else if let Ok(mut stats) = stats.lock() {
+                    stats.skipped_unchanged += 1;
+                }
+
+                pb.inc(1);
             }
-
-            // Download with retry logic handled by middleware
-            match client.download_gpx(&activity.id, &file_path).await {
-                Ok(_) => {
-                    stats.downloaded += 1;
-                }
-                Err(DownloadError::Http(status)) if status.as_u16() == 422 => {
-                    stats.skipped_no_gps.insert(expected_filename.clone());
-                }
-                Err(e) => {
-                    eprintln!("Failed to download activity {}: {}", activity.id, e);
-                    stats.failed += 1;
-                }
-            }
-        } else {
-            stats.skipped_unchanged += 1;
-        }
-
-        pb.inc(1);
-    }
+        })
+        .buffer_unordered(8)
+        .collect::<Vec<_>>()
+        .await;
 
     pb.finish_with_message("Download complete!");
 
+    // Extract final stats
+    let final_stats = stats.lock().unwrap();
     println!("Download summary:");
-    println!("  Downloaded: {}", stats.downloaded);
-    println!("  Skipped (unchanged): {}", stats.skipped_unchanged);
-    println!("  Skipped (no GPS data): {}", stats.skipped_no_gps.len());
-    println!("  Deleted (obsolete): {}", stats.deleted);
-    println!("  Errors: {}", stats.failed);
+    println!("  Downloaded: {}", final_stats.downloaded);
+    println!("  Skipped (unchanged): {}", final_stats.skipped_unchanged);
+    println!("  Skipped (no GPS data): {}", final_stats.skipped_no_gps.len());
+    println!("  Deleted (obsolete): {}", final_stats.deleted);
+    println!("  Errors: {}", final_stats.failed);
 
     // Write skipped filenames to log file
-    if !stats.skipped_no_gps.is_empty() {
+    if !final_stats.skipped_no_gps.is_empty() {
         let log_path = output_dir.join("skipped_no_gps.log");
         match fs::File::create(&log_path) {
             Ok(mut file) => {
-                for filename in &stats.skipped_no_gps {
+                for filename in &final_stats.skipped_no_gps {
                     writeln!(file, "{filename}").ok();
                 }
             }
