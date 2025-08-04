@@ -1,10 +1,10 @@
 use base64::prelude::*;
+use reqwest::StatusCode;
 use reqwest_middleware::{ClientBuilder, ClientWithMiddleware};
 use reqwest_retry::{RetryTransientMiddleware, policies::ExponentialBackoff};
 use serde::Deserialize;
-use std::path::Path;
 use std::fs;
-use reqwest::StatusCode;
+use std::path::Path;
 
 const ENDPOINT: &str = "https://intervals.icu";
 
@@ -55,9 +55,14 @@ impl IntervalsClient {
         Self { client, api_key }
     }
 
-    pub async fn fetch_activities(&self, athlete_id: &str) -> Result<Vec<Activity>, Box<dyn std::error::Error>> {
+    pub async fn fetch_activities(
+        &self,
+        athlete_id: &str,
+    ) -> Result<Vec<Activity>, Box<dyn std::error::Error>> {
         let path = format!("{ENDPOINT}/api/v1/athlete/{athlete_id}/activities.csv");
-        let body = self.client.get(path)
+        let body = self
+            .client
+            .get(path)
             .header("Authorization", self.auth_header())
             .send()
             .await?
@@ -66,31 +71,40 @@ impl IntervalsClient {
 
         let mut rdr = csv::Reader::from_reader(body.as_bytes());
         let mut activities = Vec::new();
-        
+
         for result in rdr.deserialize() {
             let activity: Activity = result?;
             activities.push(activity);
         }
-        
+
         Ok(activities)
     }
 
-    pub async fn download_gpx(&self, activity_id: &str, file_path: &Path) -> Result<(), DownloadError> {
+    pub async fn download_gpx(
+        &self,
+        activity_id: &str,
+        file_path: &Path,
+    ) -> Result<(), DownloadError> {
         let path = format!("{ENDPOINT}/api/v1/activity/{activity_id}/gpx-file");
-        let response = self.client.get(path)
+        let response = self
+            .client
+            .get(path)
             .header("Authorization", self.auth_header())
             .send()
             .await
             .map_err(DownloadError::Network)?;
-        
+
         let status = response.status();
         if !status.is_success() {
             return Err(DownloadError::Http(status));
         }
-        
-        let body = response.text().await.map_err(|e| DownloadError::Network(reqwest_middleware::Error::Reqwest(e)))?;
+
+        let body = response
+            .text()
+            .await
+            .map_err(|e| DownloadError::Network(reqwest_middleware::Error::Reqwest(e)))?;
         fs::write(file_path, body).map_err(DownloadError::Io)?;
-        
+
         Ok(())
     }
 

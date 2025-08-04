@@ -2,9 +2,11 @@ use clap::{Parser, Subcommand};
 use std::env;
 use std::path::PathBuf;
 
-mod intervals_client;
+mod convert;
 mod download;
-use download::{list_activities, download_activity, download_all_activities};
+mod intervals_client;
+use convert::convert_gpx_directory;
+use download::{download_activity, download_all_activities, list_activities};
 
 #[derive(Parser)]
 struct Cli {
@@ -38,6 +40,12 @@ enum Commands {
         #[arg(short, long)]
         output_dir: PathBuf,
     },
+    /// Convert GPX files in a directory to GeoJSON format
+    Convert {
+        /// Directory containing GPX files
+        #[arg(short, long)]
+        dir: PathBuf,
+    },
 }
 
 #[tokio::main]
@@ -56,6 +64,9 @@ async fn main() {
     match args.command {
         Commands::List { id } => list_activities(&api_key, &id).await,
         Commands::Download { id, path } => download_activity(&api_key, &id, &path).await,
-        Commands::DownloadAll { id, output_dir } => download_all_activities(&api_key, &id, &output_dir).await,
+        Commands::DownloadAll { id, output_dir } => {
+            download_all_activities(&api_key, &id, &output_dir).await
+        }
+        Commands::Convert { dir } => convert_gpx_directory(&dir).await,
     }
 }

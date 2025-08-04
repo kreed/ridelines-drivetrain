@@ -1,11 +1,11 @@
+use crate::intervals_client::{Activity, DownloadError, IntervalsClient};
+use indicatif::{ProgressBar, ProgressStyle};
+use regex::Regex;
+use sanitize_filename::sanitize;
 use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::io::Write;
 use std::path::Path;
-use indicatif::{ProgressBar, ProgressStyle};
-use sanitize_filename::sanitize;
-use regex::Regex;
-use crate::intervals_client::{Activity, IntervalsClient, DownloadError};
 
 #[derive(Debug)]
 pub struct DownloadStats {
@@ -33,7 +33,7 @@ pub async fn list_activities(api_key: &str, athlete_id: &str) {
 
 pub async fn download_activity(api_key: &str, activity_id: &str, output_path: &Path) {
     let client = IntervalsClient::new(api_key.to_string());
-    
+
     match client.download_gpx(activity_id, output_path).await {
         Ok(_) => {
             println!("GPX file saved to: {}", output_path.display());
@@ -74,14 +74,21 @@ pub async fn download_all_activities(api_key: &str, athlete_id: &str, output_dir
     let current_activity_ids: HashSet<String> = activities.iter().map(|a| a.id.clone()).collect();
 
     // Find activities to delete (exist locally but not in current activity list)
-    let activities_to_delete: Vec<String> = existing_activity_ids.difference(&current_activity_ids).cloned().collect();
-    
+    let activities_to_delete: Vec<String> = existing_activity_ids
+        .difference(&current_activity_ids)
+        .cloned()
+        .collect();
+
     // Set up progress bar
     let pb = ProgressBar::new(activities.len() as u64);
-    pb.set_style(ProgressStyle::default_bar()
-        .template("{spinner:.green} [{elapsed_precise}] [{wide_bar:.cyan/blue}] {pos}/{len} ({eta})")
-        .unwrap()
-        .progress_chars("#>-"));
+    pb.set_style(
+        ProgressStyle::default_bar()
+            .template(
+                "{spinner:.green} [{elapsed_precise}] [{wide_bar:.cyan/blue}] {pos}/{len} ({eta})",
+            )
+            .unwrap()
+            .progress_chars("#>-"),
+    );
 
     let mut stats = DownloadStats {
         total: activities.len(),
@@ -118,7 +125,7 @@ pub async fn download_all_activities(api_key: &str, athlete_id: &str, output_dir
 
         let expected_filename = generate_filename(&activity);
         let file_path = output_dir.join(&expected_filename);
-        
+
         // Check if we need to download/update this activity
         let needs_download = if let Some(existing_filename) = existing_files.get(&activity.id) {
             // File exists, check if metadata has changed
@@ -139,10 +146,10 @@ pub async fn download_all_activities(api_key: &str, athlete_id: &str, output_dir
             match client.download_gpx(&activity.id, &file_path).await {
                 Ok(_) => {
                     stats.downloaded += 1;
-                },
+                }
                 Err(DownloadError::Http(status)) if status.as_u16() == 422 => {
                     stats.skipped_no_gps.insert(expected_filename.clone());
-                },
+                }
                 Err(e) => {
                     eprintln!("Failed to download activity {}: {}", activity.id, e);
                     stats.failed += 1;
@@ -151,12 +158,12 @@ pub async fn download_all_activities(api_key: &str, athlete_id: &str, output_dir
         } else {
             stats.skipped_unchanged += 1;
         }
-        
+
         pb.inc(1);
     }
 
     pb.finish_with_message("Download complete");
-    
+
     // Print summary
     println!("\nDownload Summary:");
     println!("Total activities: {}", stats.total);
@@ -174,7 +181,7 @@ pub async fn download_all_activities(api_key: &str, athlete_id: &str, output_dir
                 for filename in &stats.skipped_no_gps {
                     writeln!(file, "{filename}").ok();
                 }
-            },
+            }
             Err(e) => {
                 eprintln!("Warning: Failed to create skipped_no_gps.log: {e}");
             }
@@ -184,7 +191,7 @@ pub async fn download_all_activities(api_key: &str, athlete_id: &str, output_dir
 
 fn get_existing_gpx_files(output_dir: &Path) -> HashMap<String, String> {
     let mut files = HashMap::new();
-    
+
     if let Ok(entries) = fs::read_dir(output_dir) {
         for entry in entries.flatten() {
             if let Some(filename) = entry.file_name().to_str() {
@@ -196,7 +203,7 @@ fn get_existing_gpx_files(output_dir: &Path) -> HashMap<String, String> {
             }
         }
     }
-    
+
     files
 }
 
@@ -206,9 +213,11 @@ fn generate_filename(activity: &Activity) -> String {
     let sanitized_type = sanitize(&activity.activity_type);
     let distance_str = format_distance(activity.distance);
     let elapsed_time_str = format_elapsed_time(activity.elapsed_time);
-    
-    format!("{}-{}-{}-{}-{}-{}.gpx", 
-        date, sanitized_name, sanitized_type, distance_str, elapsed_time_str, activity.id)
+
+    format!(
+        "{}-{}-{}-{}-{}-{}.gpx",
+        date, sanitized_name, sanitized_type, distance_str, elapsed_time_str, activity.id
+    )
 }
 
 fn parse_iso_date(date_str: &str) -> String {
@@ -227,7 +236,7 @@ fn format_elapsed_time(elapsed_seconds: i64) -> String {
     let hours = elapsed_seconds / 3600;
     let minutes = (elapsed_seconds % 3600) / 60;
     let seconds = elapsed_seconds % 60;
-    
+
     if hours > 0 {
         format!("{hours}h{minutes}m{seconds}s")
     } else if minutes > 0 {
