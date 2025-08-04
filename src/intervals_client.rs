@@ -13,8 +13,10 @@ pub struct Activity {
     pub name: String,
     pub start_date_local: String,
     pub distance: Option<f64>,
-    pub total_elevation_gain: Option<f64>,
     pub trainer: Option<bool>,
+    #[serde(rename = "type")]
+    pub activity_type: String,
+    pub elapsed_time: i64,
 }
 
 pub struct IntervalsClient {

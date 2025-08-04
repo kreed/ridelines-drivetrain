@@ -765,6 +765,7 @@ dependencies = [
  "csv",
  "dotenv",
  "indicatif",
+ "regex",
  "reqwest",
  "reqwest-middleware",
  "reqwest-retry",

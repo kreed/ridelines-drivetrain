@@ -5,6 +5,7 @@ use std::path::{Path, PathBuf};
 use std::collections::{HashMap, HashSet};
 use indicatif::{ProgressBar, ProgressStyle};
 use sanitize_filename::sanitize;
+use regex::Regex;
 
 mod intervals_client;
 use intervals_client::{Activity, IntervalsClient};
@@ -161,8 +162,11 @@ async fn download_all_activities(api_key: &str, athlete_id: &str, output_dir: &P
 
     // Process each activity
     for activity in activities {
-        // Skip activities without GPS data. We rely on a heuristic here (no distance || (trainer && no elevation gain) == no GPS). TODO: see if there's a better way to determine this
-        if activity.distance.is_none() || (activity.trainer == Some(true) && activity.total_elevation_gain.is_none()) {
+        // Skip activities without GPS data. We rely on a heuristic here because there isn't any field in the activity list that tells explicitly if an activity has GPS data.
+        let has_distance = activity.distance.unwrap_or(0.0) > 0.0;
+        let is_zwift = activity.name.to_lowercase().contains("zwift");
+        let skip_trainer_activity = activity.trainer == Some(true) && !is_zwift;
+        if !has_distance || skip_trainer_activity {
             stats.skipped_no_gps += 1;
             pb.inc(1);
             continue;
@@ -238,9 +242,12 @@ fn get_existing_gpx_files(output_dir: &Path) -> HashMap<String, String> {
 fn generate_filename(activity: &Activity) -> String {
     let date = parse_iso_date(&activity.start_date_local);
     let sanitized_name = sanitize(&activity.name);
+    let sanitized_type = sanitize(&activity.activity_type);
     let distance_str = format_distance(activity.distance);
+    let elapsed_time_str = format_elapsed_time(activity.elapsed_time);
     
-    format!("{}-{}-{}-{}.gpx", date, sanitized_name, activity.id, distance_str)
+    format!("{}-{}-{}-{}-{}-{}.gpx", 
+        date, sanitized_name, sanitized_type, distance_str, elapsed_time_str, activity.id)
 }
 
 fn parse_iso_date(date_str: &str) -> String {
@@ -256,14 +263,23 @@ fn format_distance(distance: Option<f64>) -> String {
     }
 }
 
-fn extract_activity_id_from_filename(filename: &str) -> Option<String> {
-    // Parse filename format: {date}-{name}-{activity_id}-{distance}.gpx
-    let parts: Vec<&str> = filename.trim_end_matches(".gpx").split('-').collect();
-    if parts.len() >= 4 {
-        // Activity ID should be the third-to-last part (before distance)
-        Some(parts[parts.len() - 2].to_string())
+fn format_elapsed_time(elapsed_seconds: i64) -> String {
+    let hours = elapsed_seconds / 3600;
+    let minutes = (elapsed_seconds % 3600) / 60;
+    let seconds = elapsed_seconds % 60;
+    
+    if hours > 0 {
+        format!("{}h{}m{}s", hours, minutes, seconds)
+    } else if minutes > 0 {
+        format!("{}m{}s", minutes, seconds)
     } else {
-        None
+        format!("{}s", seconds)
     }
+}
+
+fn extract_activity_id_from_filename(filename: &str) -> Option<String> {
+    // Extract activity ID using regex with match group - all IDs start with 'i' and end before .gpx
+    let re = Regex::new(r"-(i\d+)\.gpx$").unwrap();
+    re.captures(filename).map(|caps| caps[1].to_string())
 }
 
