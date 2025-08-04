@@ -108,10 +108,8 @@ pub async fn download_all_activities(api_key: &str, athlete_id: &str, output_dir
         // Skip activities without GPS data. We rely on a heuristic here because there isn't any field in the activity list that tells explicitly if an activity has GPS data.
         let has_distance = activity.distance.unwrap_or(0.0) > 0.0;
         let is_zwift = activity.name.to_lowercase().contains("zwift");
-        let peloton_regex = Regex::new(r"(?i)\d+\s+min.*ride\s+with").unwrap();
-        let is_peloton = peloton_regex.is_match(&activity.name);
         let skip_trainer_activity = activity.trainer == Some(true) && !is_zwift;
-        if !has_distance || skip_trainer_activity || is_peloton {
+        if !has_distance || skip_trainer_activity {
             let expected_filename = generate_filename(&activity);
             stats.skipped_no_gps.insert(expected_filename);
             pb.inc(1);
