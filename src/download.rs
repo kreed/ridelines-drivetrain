@@ -9,7 +9,6 @@ use std::path::Path;
 
 #[derive(Debug)]
 pub struct DownloadStats {
-    pub total: usize,
     pub downloaded: usize,
     pub skipped_unchanged: usize,
     pub skipped_no_gps: HashSet<String>,
@@ -83,15 +82,12 @@ pub async fn download_all_activities(api_key: &str, athlete_id: &str, output_dir
     let pb = ProgressBar::new(activities.len() as u64);
     pb.set_style(
         ProgressStyle::default_bar()
-            .template(
-                "{spinner:.green} [{elapsed_precise}] [{wide_bar:.cyan/blue}] {pos}/{len} ({eta})",
-            )
+            .template("{spinner:.green} [{elapsed_precise}] [{bar:40.cyan/blue}] {pos}/{len} {msg}")
             .unwrap()
             .progress_chars("#>-"),
     );
 
     let mut stats = DownloadStats {
-        total: activities.len(),
         downloaded: 0,
         skipped_unchanged: 0,
         skipped_no_gps: HashSet::new(),
@@ -112,6 +108,8 @@ pub async fn download_all_activities(api_key: &str, athlete_id: &str, output_dir
 
     // Process each activity
     for activity in activities {
+        pb.set_message(format!("Processing {}", activity.name));
+        
         // Skip activities without GPS data. We rely on a heuristic here because there isn't any field in the activity list that tells explicitly if an activity has GPS data.
         let has_distance = activity.distance.unwrap_or(0.0) > 0.0;
         let is_zwift = activity.name.to_lowercase().contains("zwift");
@@ -162,16 +160,14 @@ pub async fn download_all_activities(api_key: &str, athlete_id: &str, output_dir
         pb.inc(1);
     }
 
-    pb.finish_with_message("Download complete");
+    pb.finish_with_message("Download complete!");
 
-    // Print summary
-    println!("\nDownload Summary:");
-    println!("Total activities: {}", stats.total);
-    println!("Downloaded: {}", stats.downloaded);
-    println!("Skipped (unchanged): {}", stats.skipped_unchanged);
-    println!("Skipped (no GPS data): {}", stats.skipped_no_gps.len());
-    println!("Failed: {}", stats.failed);
-    println!("Deleted (obsolete): {}", stats.deleted);
+    println!("Download summary:");
+    println!("  Downloaded: {}", stats.downloaded);
+    println!("  Skipped (unchanged): {}", stats.skipped_unchanged);
+    println!("  Skipped (no GPS data): {}", stats.skipped_no_gps.len());
+    println!("  Deleted (obsolete): {}", stats.deleted);
+    println!("  Errors: {}", stats.failed);
 
     // Write skipped filenames to log file
     if !stats.skipped_no_gps.is_empty() {
