@@ -4,6 +4,7 @@ use indicatif::{ProgressBar, ProgressStyle};
 use std::fs;
 use std::io::BufReader;
 use std::path::{Path, PathBuf};
+use geo::{Point, HaversineDistance};
 
 pub async fn convert_gpx_directory(directory: &Path) {
     println!("Converting GPX files in directory: {}", directory.display());
@@ -158,6 +159,69 @@ fn cleanup_orphaned_geojson_files(directory: &Path) -> Result<usize, Box<dyn std
     Ok(deleted_count)
 }
 
+fn split_segment_on_gaps(points: &[gpx::Waypoint], max_gap_meters: f64) -> Vec<Vec<Vec<f64>>> {
+    let mut linestrings = Vec::new();
+    let mut current_coords = Vec::new();
+    
+    for (i, point) in points.iter().enumerate() {
+        let coord = {
+            let mut coord = vec![point.point().x(), point.point().y()];
+            if let Some(elevation) = point.elevation {
+                coord.push(elevation);
+            }
+            coord
+        };
+        
+        if i == 0 {
+            // First point
+            current_coords.push(coord);
+        } else {
+            // Calculate distance from previous point
+            let prev_point = &points[i - 1];
+            let curr_geo_point = Point::new(point.point().x(), point.point().y());
+            let prev_geo_point = Point::new(prev_point.point().x(), prev_point.point().y());
+            
+            let distance = curr_geo_point.haversine_distance(&prev_geo_point);
+            
+            if distance > max_gap_meters {
+                // Gap is too large, start a new linestring
+                if current_coords.len() > 1 {
+                    linestrings.push(current_coords);
+                }
+                current_coords = vec![coord];
+            } else {
+                // Normal distance, continue current linestring
+                current_coords.push(coord);
+            }
+        }
+    }
+    
+    // Add the final linestring if it has more than one point
+    if current_coords.len() > 1 {
+        linestrings.push(current_coords);
+    }
+    
+    // If no valid linestrings were created but we have points, 
+    // return a single linestring with all points
+    if linestrings.is_empty() && !points.is_empty() {
+        let coords: Vec<Vec<f64>> = points
+            .iter()
+            .map(|point| {
+                let mut coord = vec![point.point().x(), point.point().y()];
+                if let Some(elevation) = point.elevation {
+                    coord.push(elevation);
+                }
+                coord
+            })
+            .collect();
+        if coords.len() > 1 {
+            linestrings.push(coords);
+        }
+    }
+    
+    linestrings
+}
+
 async fn convert_gpx_to_geojson(gpx_file: &Path) -> Result<(), Box<dyn std::error::Error>> {
     // Read and parse GPX file
     let file = fs::File::open(gpx_file)?;
@@ -171,39 +235,36 @@ async fn convert_gpx_to_geojson(gpx_file: &Path) -> Result<(), Box<dyn std::erro
     for track in &gpx.tracks {
         for segment in &track.segments {
             if !segment.points.is_empty() {
-                // Create LineString from track points
-                let coords: Vec<Vec<f64>> = segment
-                    .points
-                    .iter()
-                    .map(|point| {
-                        let mut coord = vec![point.point().x(), point.point().y()];
-                        if let Some(elevation) = point.elevation {
-                            coord.push(elevation);
-                        }
-                        coord
-                    })
-                    .collect();
+                // Split segment into multiple linestrings if gaps > 100m exist
+                let linestrings = split_segment_on_gaps(&segment.points, 100.0);
+                
+                for (i, coords) in linestrings.into_iter().enumerate() {
+                    let geometry = Geometry::new(Value::LineString(coords));
 
-                let geometry = Geometry::new(Value::LineString(coords));
+                    let mut properties = serde_json::Map::new();
+                    if let Some(name) = &track.name {
+                        let segment_name = if i == 0 {
+                            name.clone()
+                        } else {
+                            format!("{}_part_{}", name, i + 1)
+                        };
+                        properties.insert("name".to_string(), serde_json::Value::String(segment_name));
+                    }
+                    properties.insert(
+                        "type".to_string(),
+                        serde_json::Value::String("track".to_string()),
+                    );
 
-                let mut properties = serde_json::Map::new();
-                if let Some(name) = &track.name {
-                    properties.insert("name".to_string(), serde_json::Value::String(name.clone()));
+                    let feature = Feature {
+                        bbox: None,
+                        geometry: Some(geometry),
+                        id: None,
+                        properties: Some(properties),
+                        foreign_members: None,
+                    };
+
+                    features.push(feature);
                 }
-                properties.insert(
-                    "type".to_string(),
-                    serde_json::Value::String("track".to_string()),
-                );
-
-                let feature = Feature {
-                    bbox: None,
-                    geometry: Some(geometry),
-                    id: None,
-                    properties: Some(properties),
-                    foreign_members: None,
-                };
-
-                features.push(feature);
             }
         }
     }
