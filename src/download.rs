@@ -1,9 +1,8 @@
 use crate::intervals_client::{Activity, DownloadError, IntervalsClient};
 use futures::stream::{self, StreamExt};
 use indicatif::{ProgressBar, ProgressStyle};
-use regex::Regex;
 use sanitize_filename::sanitize;
-use std::collections::{HashMap, HashSet};
+use std::collections::HashSet;
 use std::fs;
 use std::io::Write;
 use std::path::Path;
@@ -70,16 +69,8 @@ pub async fn download_all_activities(api_key: &str, athlete_id: &str, output_dir
         return;
     }
 
-    // Get existing files in output directory
-    let existing_files = get_existing_gpx_files(output_dir);
-    let existing_activity_ids: HashSet<String> = existing_files.keys().cloned().collect();
-    let current_activity_ids: HashSet<String> = activities.iter().map(|a| a.id.clone()).collect();
-
-    // Find activities to delete (exist locally but not in current activity list)
-    let activities_to_delete: Vec<String> = existing_activity_ids
-        .difference(&current_activity_ids)
-        .cloned()
-        .collect();
+    // Get all existing GPX files (all are potentially orphaned initially)
+    let orphaned_files = get_existing_gpx_files(output_dir);
 
     // Set up progress bar
     let pb = ProgressBar::new(activities.len() as u64);
@@ -95,28 +86,15 @@ pub async fn download_all_activities(api_key: &str, athlete_id: &str, output_dir
         skipped_unchanged: 0,
         skipped_no_gps: HashSet::new(),
         failed: 0,
-        deleted: activities_to_delete.len(),
+        deleted: 0,
     }));
-
-    // Delete obsolete activities
-    for activity_id in &activities_to_delete {
-        if let Some(filename) = existing_files.get(activity_id) {
-            let file_path = output_dir.join(filename);
-            if let Err(e) = fs::remove_file(&file_path) {
-                eprintln!("Warning: Failed to delete {filename}: {e}");
-                if let Ok(mut stats) = stats.lock() {
-                    stats.deleted -= 1;
-                }
-            }
-        }
-    }
 
     // Limit concurrent downloads to avoid overwhelming the server
     let semaphore = Arc::new(Semaphore::new(8));
     let pb = Arc::new(pb);
     let client = Arc::new(client);
     let output_dir = Arc::new(output_dir.to_path_buf());
-    let existing_files = Arc::new(existing_files);
+    let orphaned_files = Arc::new(Mutex::new(orphaned_files));
 
     // Process activities in parallel
     stream::iter(activities)
@@ -126,19 +104,25 @@ pub async fn download_all_activities(api_key: &str, athlete_id: &str, output_dir
             let stats = stats.clone();
             let client = client.clone();
             let output_dir = output_dir.clone();
-            let existing_files = existing_files.clone();
+            let orphaned_files = orphaned_files.clone();
 
             async move {
                 let _permit = semaphore.acquire().await.unwrap();
                 
                 pb.set_message(format!("Processing {}", activity.name));
                 
+                let expected_filename = generate_filename(&activity);
+                
+                // Remove the expected filename from orphaned files (it's not orphaned)
+                if let Ok(mut orphaned) = orphaned_files.lock() {
+                    orphaned.remove(&expected_filename);
+                }
+                
                 // Skip activities without GPS data
                 let has_distance = activity.distance.unwrap_or(0.0) > 0.0;
                 let is_zwift = activity.name.to_lowercase().contains("zwift");
                 let skip_trainer_activity = activity.trainer == Some(true) && !is_zwift;
                 if !has_distance || skip_trainer_activity {
-                    let expected_filename = generate_filename(&activity);
                     if let Ok(mut stats) = stats.lock() {
                         stats.skipped_no_gps.insert(expected_filename);
                     }
@@ -146,23 +130,12 @@ pub async fn download_all_activities(api_key: &str, athlete_id: &str, output_dir
                     return;
                 }
 
-                let expected_filename = generate_filename(&activity);
                 let file_path = output_dir.join(&expected_filename);
 
-                // Check if we need to download/update this activity
-                let needs_download = if let Some(existing_filename) = existing_files.get(&activity.id) {
-                    existing_filename != &expected_filename
-                } else {
-                    true
-                };
+                // Check if we need to download this activity (file doesn't exist)
+                let needs_download = !file_path.exists();
 
                 if needs_download {
-                    // Remove old file if it exists with different name
-                    if let Some(existing_filename) = existing_files.get(&activity.id) {
-                        let old_path = output_dir.join(existing_filename);
-                        let _ = fs::remove_file(old_path);
-                    }
-
                     // Download with retry logic handled by middleware
                     match client.download_gpx(&activity.id, &file_path).await {
                         Ok(_) => {
@@ -195,6 +168,21 @@ pub async fn download_all_activities(api_key: &str, athlete_id: &str, output_dir
 
     pb.finish_with_message("Download complete!");
 
+    // Delete all remaining orphaned files
+    let orphaned_files_to_delete = orphaned_files.lock().unwrap();
+    let deleted_count = orphaned_files_to_delete.len();
+    for filename in orphaned_files_to_delete.iter() {
+        let file_path = output_dir.join(filename);
+        if let Err(e) = fs::remove_file(&file_path) {
+            eprintln!("Warning: Failed to delete orphaned file {filename}: {e}");
+        }
+    }
+    
+    // Update deleted count in stats
+    if let Ok(mut stats) = stats.lock() {
+        stats.deleted = deleted_count;
+    }
+
     // Extract final stats
     let final_stats = stats.lock().unwrap();
     println!("Download summary:");
@@ -220,16 +208,14 @@ pub async fn download_all_activities(api_key: &str, athlete_id: &str, output_dir
     }
 }
 
-fn get_existing_gpx_files(output_dir: &Path) -> HashMap<String, String> {
-    let mut files = HashMap::new();
+fn get_existing_gpx_files(output_dir: &Path) -> HashSet<String> {
+    let mut files = HashSet::new();
 
     if let Ok(entries) = fs::read_dir(output_dir) {
         for entry in entries.flatten() {
             if let Some(filename) = entry.file_name().to_str() {
                 if filename.ends_with(".gpx") {
-                    if let Some(activity_id) = extract_activity_id_from_filename(filename) {
-                        files.insert(activity_id, filename.to_string());
-                    }
+                    files.insert(filename.to_string());
                 }
             }
         }
@@ -277,8 +263,3 @@ fn format_elapsed_time(elapsed_seconds: i64) -> String {
     }
 }
 
-fn extract_activity_id_from_filename(filename: &str) -> Option<String> {
-    // Extract activity ID using regex with match group - all IDs start with 'i' and end before .gpx
-    let re = Regex::new(r"-(i\d+)\.gpx$").unwrap();
-    re.captures(filename).map(|caps| caps[1].to_string())
-}

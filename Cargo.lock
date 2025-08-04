@@ -915,7 +915,6 @@ dependencies = [
  "geojson",
  "gpx",
  "indicatif",
- "regex",
  "reqwest",
  "reqwest-middleware",
  "reqwest-retry",
