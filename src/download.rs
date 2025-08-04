@@ -26,7 +26,7 @@ pub async fn list_activities(api_key: &str, athlete_id: &str) {
             }
         }
         Err(e) => {
-            eprintln!("Error fetching activities: {}", e);
+            eprintln!("Error fetching activities: {e}");
         }
     }
 }
@@ -39,7 +39,7 @@ pub async fn download_activity(api_key: &str, activity_id: &str, output_path: &P
             println!("GPX file saved to: {}", output_path.display());
         }
         Err(e) => {
-            eprintln!("Error downloading GPX for activity {}: {}", activity_id, e);
+            eprintln!("Error downloading GPX for activity {activity_id}: {e}");
         }
     }
 }
@@ -47,7 +47,7 @@ pub async fn download_activity(api_key: &str, activity_id: &str, output_path: &P
 pub async fn download_all_activities(api_key: &str, athlete_id: &str, output_dir: &Path) {
     // Create output directory if it doesn't exist
     if let Err(e) = fs::create_dir_all(output_dir) {
-        eprintln!("Error creating output directory: {}", e);
+        eprintln!("Error creating output directory: {e}");
         return;
     }
 
@@ -58,13 +58,13 @@ pub async fn download_all_activities(api_key: &str, athlete_id: &str, output_dir
     let activities = match client.fetch_activities(athlete_id).await {
         Ok(activities) => activities,
         Err(e) => {
-            eprintln!("Error fetching activities: {}", e);
+            eprintln!("Error fetching activities: {e}");
             return;
         }
     };
 
     if activities.is_empty() {
-        println!("No activities found for athlete {}", athlete_id);
+        println!("No activities found for athlete {athlete_id}");
         return;
     }
 
@@ -97,7 +97,7 @@ pub async fn download_all_activities(api_key: &str, athlete_id: &str, output_dir
         if let Some(filename) = existing_files.get(activity_id) {
             let file_path = output_dir.join(filename);
             if let Err(e) = fs::remove_file(&file_path) {
-                eprintln!("Warning: Failed to delete {}: {}", filename, e);
+                eprintln!("Warning: Failed to delete {filename}: {e}");
                 stats.deleted -= 1;
             }
         }
@@ -174,11 +174,11 @@ pub async fn download_all_activities(api_key: &str, athlete_id: &str, output_dir
         match fs::File::create(&log_path) {
             Ok(mut file) => {
                 for filename in &stats.skipped_no_gps {
-                    writeln!(file, "{}", filename).ok();
+                    writeln!(file, "{filename}").ok();
                 }
             },
             Err(e) => {
-                eprintln!("Warning: Failed to create skipped_no_gps.log: {}", e);
+                eprintln!("Warning: Failed to create skipped_no_gps.log: {e}");
             }
         }
     }
@@ -231,11 +231,11 @@ fn format_elapsed_time(elapsed_seconds: i64) -> String {
     let seconds = elapsed_seconds % 60;
     
     if hours > 0 {
-        format!("{}h{}m{}s", hours, minutes, seconds)
+        format!("{hours}h{minutes}m{seconds}s")
     } else if minutes > 0 {
-        format!("{}m{}s", minutes, seconds)
+        format!("{minutes}m{seconds}s")
     } else {
-        format!("{}s", seconds)
+        format!("{seconds}s")
     }
 }
 

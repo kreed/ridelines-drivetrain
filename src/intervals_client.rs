@@ -18,9 +18,9 @@ pub enum DownloadError {
 impl std::fmt::Display for DownloadError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            DownloadError::Http(status) => write!(f, "HTTP {}", status),
-            DownloadError::Network(e) => write!(f, "Network error: {}", e),
-            DownloadError::Io(e) => write!(f, "IO error: {}", e),
+            DownloadError::Http(status) => write!(f, "HTTP {status}"),
+            DownloadError::Network(e) => write!(f, "Network error: {e}"),
+            DownloadError::Io(e) => write!(f, "IO error: {e}"),
         }
     }
 }
@@ -81,7 +81,7 @@ impl IntervalsClient {
             .header("Authorization", self.auth_header())
             .send()
             .await
-            .map_err(|e| DownloadError::Network(e))?;
+            .map_err(DownloadError::Network)?;
         
         let status = response.status();
         if !status.is_success() {
@@ -89,7 +89,7 @@ impl IntervalsClient {
         }
         
         let body = response.text().await.map_err(|e| DownloadError::Network(reqwest_middleware::Error::Reqwest(e)))?;
-        fs::write(file_path, body).map_err(|e| DownloadError::Io(e))?;
+        fs::write(file_path, body).map_err(DownloadError::Io)?;
         
         Ok(())
     }
