@@ -3,12 +3,13 @@ use std::env;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::collections::{HashMap, HashSet};
+use std::io::Write;
 use indicatif::{ProgressBar, ProgressStyle};
 use sanitize_filename::sanitize;
 use regex::Regex;
 
 mod intervals_client;
-use intervals_client::{Activity, IntervalsClient};
+use intervals_client::{Activity, IntervalsClient, DownloadError};
 
 #[derive(Parser)]
 struct Cli {
@@ -69,7 +70,7 @@ struct DownloadStats {
     total: usize,
     downloaded: usize,
     skipped_unchanged: usize,
-    skipped_no_gps: usize,
+    skipped_no_gps: HashSet<String>,
     failed: usize,
     deleted: usize,
 }
@@ -144,7 +145,7 @@ async fn download_all_activities(api_key: &str, athlete_id: &str, output_dir: &P
         total: activities.len(),
         downloaded: 0,
         skipped_unchanged: 0,
-        skipped_no_gps: 0,
+        skipped_no_gps: HashSet::new(),
         failed: 0,
         deleted: activities_to_delete.len(),
     };
@@ -160,6 +161,7 @@ async fn download_all_activities(api_key: &str, athlete_id: &str, output_dir: &P
         }
     }
 
+
     // Process each activity
     for activity in activities {
         // Skip activities without GPS data. We rely on a heuristic here because there isn't any field in the activity list that tells explicitly if an activity has GPS data.
@@ -167,7 +169,8 @@ async fn download_all_activities(api_key: &str, athlete_id: &str, output_dir: &P
         let is_zwift = activity.name.to_lowercase().contains("zwift");
         let skip_trainer_activity = activity.trainer == Some(true) && !is_zwift;
         if !has_distance || skip_trainer_activity {
-            stats.skipped_no_gps += 1;
+            let expected_filename = generate_filename(&activity);
+            stats.skipped_no_gps.insert(expected_filename);
             pb.inc(1);
             continue;
         }
@@ -196,6 +199,9 @@ async fn download_all_activities(api_key: &str, athlete_id: &str, output_dir: &P
                 Ok(_) => {
                     stats.downloaded += 1;
                 },
+                Err(DownloadError::Http(status)) if status.as_u16() == 422 => {
+                    stats.skipped_no_gps.insert(expected_filename.clone());
+                },
                 Err(e) => {
                     eprintln!("Failed to download activity {}: {}", activity.id, e);
                     stats.failed += 1;
@@ -215,9 +221,24 @@ async fn download_all_activities(api_key: &str, athlete_id: &str, output_dir: &P
     println!("Total activities: {}", stats.total);
     println!("Downloaded: {}", stats.downloaded);
     println!("Skipped (unchanged): {}", stats.skipped_unchanged);
-    println!("Skipped (no GPS data): {}", stats.skipped_no_gps);
+    println!("Skipped (no GPS data): {}", stats.skipped_no_gps.len());
     println!("Failed: {}", stats.failed);
     println!("Deleted (obsolete): {}", stats.deleted);
+
+    // Write skipped filenames to log file
+    if !stats.skipped_no_gps.is_empty() {
+        let log_path = output_dir.join("skipped_no_gps.log");
+        match fs::File::create(&log_path) {
+            Ok(mut file) => {
+                for filename in &stats.skipped_no_gps {
+                    writeln!(file, "{}", filename).ok();
+                }
+            },
+            Err(e) => {
+                eprintln!("Warning: Failed to create skipped_no_gps.log: {}", e);
+            }
+        }
+    }
 }
 
 

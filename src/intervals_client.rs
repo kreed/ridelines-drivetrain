@@ -4,8 +4,28 @@ use reqwest_retry::{RetryTransientMiddleware, policies::ExponentialBackoff};
 use serde::Deserialize;
 use std::path::Path;
 use std::fs;
+use reqwest::StatusCode;
 
 const ENDPOINT: &str = "https://intervals.icu";
+
+#[derive(Debug)]
+pub enum DownloadError {
+    Http(StatusCode),
+    Network(reqwest_middleware::Error),
+    Io(std::io::Error),
+}
+
+impl std::fmt::Display for DownloadError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            DownloadError::Http(status) => write!(f, "HTTP {}", status),
+            DownloadError::Network(e) => write!(f, "Network error: {}", e),
+            DownloadError::Io(e) => write!(f, "IO error: {}", e),
+        }
+    }
+}
+
+impl std::error::Error for DownloadError {}
 
 #[derive(Debug, Deserialize, Clone)]
 pub struct Activity {
@@ -55,19 +75,21 @@ impl IntervalsClient {
         Ok(activities)
     }
 
-    pub async fn download_gpx(&self, activity_id: &str, file_path: &Path) -> Result<(), Box<dyn std::error::Error>> {
+    pub async fn download_gpx(&self, activity_id: &str, file_path: &Path) -> Result<(), DownloadError> {
         let path = format!("{ENDPOINT}/api/v1/activity/{activity_id}/gpx-file");
         let response = self.client.get(path)
             .header("Authorization", self.auth_header())
             .send()
-            .await?;
+            .await
+            .map_err(|e| DownloadError::Network(e))?;
         
-        if !response.status().is_success() {
-            return Err(format!("HTTP {}: Failed to download GPX for activity {}", response.status(), activity_id).into());
+        let status = response.status();
+        if !status.is_success() {
+            return Err(DownloadError::Http(status));
         }
         
-        let body = response.text().await?;
-        fs::write(file_path, body)?;
+        let body = response.text().await.map_err(|e| DownloadError::Network(reqwest_middleware::Error::Reqwest(e)))?;
+        fs::write(file_path, body).map_err(|e| DownloadError::Io(e))?;
         
         Ok(())
     }
