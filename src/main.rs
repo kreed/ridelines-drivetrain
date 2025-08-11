@@ -23,12 +23,12 @@ enum Commands {
         #[arg(short, long)]
         id: String,
     },
-    /// Download GPX file for a specific activity
+    /// Download FIT file for a specific activity
     Download {
         /// Activity ID
         #[arg(short, long)]
         id: String,
-        /// Path to save the GPX file
+        /// Path to save the FIT file
         #[arg(short, long)]
         path: PathBuf,
     },

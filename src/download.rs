@@ -19,14 +19,14 @@ pub async fn list_activities(api_key: &str, athlete_id: &str) {
 pub async fn download_activity(api_key: &str, activity_id: &str, output_path: &Path) -> Result<(), Box<dyn std::error::Error>> {
     let client = IntervalsClient::new(api_key.to_string());
 
-    let gpx_data = client
-        .download_gpx(activity_id)
+    let fit_data = client
+        .download_fit(activity_id)
         .await
-        .inspect_err(|e| eprintln!("Error downloading GPX for activity {activity_id}: {e}"))?;
+        .inspect_err(|e| eprintln!("Error downloading FIT for activity {activity_id}: {e}"))?;
 
-    fs::write(output_path, gpx_data)
-        .inspect_err(|e| eprintln!("Error writing GPX file to {}: {}", output_path.display(), e))?;
+    fs::write(output_path, fit_data)
+        .inspect_err(|e| eprintln!("Error writing FIT file to {}: {}", output_path.display(), e))?;
 
-    println!("GPX file saved to: {}", output_path.display());
+    println!("FIT file saved to: {}", output_path.display());
     Ok(())
 }

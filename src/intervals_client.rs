@@ -76,11 +76,12 @@ impl IntervalsClient {
         Ok(activities)
     }
 
-    pub async fn download_gpx(
+
+    pub async fn download_fit(
         &self,
         activity_id: &str,
-    ) -> Result<String, DownloadError> {
-        let path = format!("{ENDPOINT}/api/v1/activity/{activity_id}/gpx-file");
+    ) -> Result<Vec<u8>, DownloadError> {
+        let path = format!("{ENDPOINT}/api/v1/activity/{activity_id}/fit-file");
         let response = self
             .client
             .get(path)
@@ -95,11 +96,11 @@ impl IntervalsClient {
         }
 
         let body = response
-            .text()
+            .bytes()
             .await
             .map_err(|e| DownloadError::Network(reqwest_middleware::Error::Reqwest(e)))?;
 
-        Ok(body)
+        Ok(body.to_vec())
     }
 
     fn auth_header(&self) -> String {

@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-This is a Rust CLI application for interfacing with the intervals.icu API to retrieve athlete activity data. The tool allows users to list activities, download GPX files, and convert them to GeoJSON format for mapping and analysis.
+This is a Rust CLI application for interfacing with the intervals.icu API to retrieve athlete activity data. The tool allows users to list activities, download FIT files, and convert them to GeoJSON format for mapping and analysis.
 
 ## Development Commands
 
@@ -12,7 +12,7 @@ This is a Rust CLI application for interfacing with the intervals.icu API to ret
 - `cargo build` - Build the project
 - `cargo run -- --help` - Show CLI help
 - `cargo run -- list -i <athlete_id>` - List activities for an athlete
-- `cargo run -- download -i <activity_id> -p <output_path>` - Download GPX file for a specific activity
+- `cargo run -- download -i <activity_id> -p <output_path>` - Download FIT file for a specific activity
 - `cargo run -- sync -i <athlete_id> -o <output_dir>` - Sync all activities as GeoJSON files for an athlete
 
 ### Environment Configuration
@@ -31,17 +31,17 @@ This is a Rust CLI application for interfacing with the intervals.icu API to ret
 - **CLI Interface**: Uses `clap` with subcommands for different operations
 - **Commands**: 
   - `list` - Get athlete activities and display them
-  - `download` - Download single activity GPX file to specified path
+  - `download` - Download single activity FIT file to specified path
   - `sync` - Main workflow: sync all activities as GeoJSON files for an athlete with smart sync
 - **HTTP Client**: Uses `reqwest` with retry middleware (`reqwest-retry`) for robust API calls
 - **Data Format**: CSV parsing for activities list using `serde` and `csv` crate
-- **GeoJSON Conversion**: Automatic conversion of GPX data to GeoJSON format using `geojson` and `gpx` crates
+- **GeoJSON Conversion**: Automatic conversion of FIT data to GeoJSON format using `fitparser` and `geojson` crates
 - **Authentication**: Basic auth using base64-encoded "API_KEY:{api_key}" format
 
 ### API Integration
 - **Base URL**: `https://intervals.icu`
 - **Activities endpoint**: `/api/v1/athlete/{athlete_id}/activities.csv`
-- **GPX download**: `/api/v1/activity/{activity_id}/gpx-file`
+- **FIT download**: `/api/v1/activity/{activity_id}/fit-file`
 - **Auth header**: `Authorization: Basic {base64_encoded_credentials}`
 
 ### Data Models
@@ -50,7 +50,7 @@ This is a Rust CLI application for interfacing with the intervals.icu API to ret
 
 ### Sync Features
 - **Smart Sync**: Only downloads/updates activities when name, start time, or distance changes
-- **Automatic GeoJSON Conversion**: Downloads GPX data and converts to GeoJSON format automatically
+- **Automatic GeoJSON Conversion**: Downloads FIT data and converts to GeoJSON format automatically
 - **Filename-based Metadata**: Uses format `{YYYY-MM-DD}-{sanitized_name}-{activity_type}-{distance}-{elapsed_time}-{activity_id}.geojson`
 - **Smart GPS Detection**: Skips activities without GPS data using heuristics (no distance || trainer without elevation)
 - **Progress Reporting**: Shows download progress with `indicatif` progress bar

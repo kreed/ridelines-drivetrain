@@ -1,5 +1,5 @@
 use crate::intervals_client::{Activity, DownloadError, IntervalsClient};
-use crate::convert::convert_gpx_to_geojson;
+use crate::convert::convert_fit_to_geojson;
 use futures::stream::{self, StreamExt};
 use indicatif::{ProgressBar, ProgressStyle};
 use sanitize_filename::sanitize;
@@ -111,13 +111,20 @@ pub async fn sync_activities(api_key: &str, athlete_id: &str, output_dir: &Path)
 
                 if needs_download {
                     // Download with retry logic handled by middleware
-                    match client.download_gpx(&activity.id).await {
-                        Ok(gpx_data) => {
-                            // Convert GPX to GeoJSON
-                            let geojson_data = match convert_gpx_to_geojson(&gpx_data).await {
-                                Ok(data) => data,
+                    match client.download_fit(&activity.id).await {
+                        Ok(fit_data) => {
+                            // Convert FIT to GeoJSON
+                            let geojson_data = match convert_fit_to_geojson(&fit_data).await {
+                                Ok(Some(data)) => data,
+                                Ok(None) => {
+                                    // No GPS data found in FIT file
+                                    if let Ok(mut stats) = stats.lock() {
+                                        stats.skipped_no_gps.insert(expected_filename.clone());
+                                    }
+                                    return;
+                                }
                                 Err(e) => {
-                                    eprintln!("Failed to convert GPX to GeoJSON for activity {}: {}", activity.id, e);
+                                    eprintln!("Failed to convert FIT to GeoJSON for activity {}: {}", activity.id, e);
                                     if let Ok(mut stats) = stats.lock() {
                                         stats.failed += 1;
                                     }
@@ -125,7 +132,7 @@ pub async fn sync_activities(api_key: &str, athlete_id: &str, output_dir: &Path)
                                 }
                             };
 
-                            // Write GeoJSON file instead of GPX
+                            // Write GeoJSON file
                             let geojson_path = file_path.with_extension("geojson");
                             match fs::write(&geojson_path, geojson_data) {
                                 Ok(_) => {
