@@ -75,11 +75,7 @@ impl IntervalsClient {
         Ok(activities)
     }
 
-
-    pub async fn download_fit(
-        &self,
-        activity_id: &str,
-    ) -> Result<Vec<u8>, DownloadError> {
+    pub async fn download_fit(&self, activity_id: &str) -> Result<Vec<u8>, DownloadError> {
         let path = format!("{ENDPOINT}/api/v1/activity/{activity_id}/fit-file");
         let response = self
             .client

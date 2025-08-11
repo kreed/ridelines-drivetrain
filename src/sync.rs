@@ -1,5 +1,5 @@
-use crate::intervals_client::{Activity, DownloadError, IntervalsClient};
 use crate::convert::convert_fit_to_geojson;
+use crate::intervals_client::{Activity, DownloadError, IntervalsClient};
 use futures::stream::{self, StreamExt};
 use indicatif::{ProgressBar, ProgressStyle};
 use sanitize_filename::sanitize;
@@ -201,7 +201,7 @@ pub async fn sync_activities(api_key: &str, athlete_id: &str, output_dir: &Path)
             eprintln!("Warning: Failed to delete orphaned file {filename}: {e}");
         }
     }
-    
+
     // Update deleted count in stats
     if let Ok(mut stats) = stats.lock() {
         stats.deleted = deleted_count;
@@ -212,7 +212,10 @@ pub async fn sync_activities(api_key: &str, athlete_id: &str, output_dir: &Path)
     println!("Sync summary:");
     println!("  Downloaded: {}", final_stats.downloaded);
     println!("  Skipped (unchanged): {}", final_stats.skipped_unchanged);
-    println!("  Downloaded (empty/no GPS): {}", final_stats.downloaded_empty.len());
+    println!(
+        "  Downloaded (empty/no GPS): {}",
+        final_stats.downloaded_empty.len()
+    );
     println!("  Deleted (obsolete): {}", final_stats.deleted);
     println!("  Errors: {}", final_stats.failed);
 

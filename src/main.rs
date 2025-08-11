@@ -63,8 +63,6 @@ async fn main() {
                 std::process::exit(1);
             }
         }
-        Commands::Sync { id, output_dir } => {
-            sync_activities(&api_key, &id, &output_dir).await
-        }
+        Commands::Sync { id, output_dir } => sync_activities(&api_key, &id, &output_dir).await,
     }
 }

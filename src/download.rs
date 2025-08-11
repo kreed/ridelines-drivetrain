@@ -16,7 +16,11 @@ pub async fn list_activities(api_key: &str, athlete_id: &str) {
     }
 }
 
-pub async fn download_activity(api_key: &str, activity_id: &str, output_path: &Path) -> Result<(), Box<dyn std::error::Error>> {
+pub async fn download_activity(
+    api_key: &str,
+    activity_id: &str,
+    output_path: &Path,
+) -> Result<(), Box<dyn std::error::Error>> {
     let client = IntervalsClient::new(api_key.to_string());
 
     let fit_data = client
