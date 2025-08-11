@@ -13,7 +13,7 @@ This is a Rust CLI application for interfacing with the intervals.icu API to ret
 - `cargo run -- --help` - Show CLI help
 - `cargo run -- list -i <athlete_id>` - List activities for an athlete
 - `cargo run -- download -i <activity_id> -p <output_path>` - Download GPX file for a specific activity
-- `cargo run -- download-all -i <athlete_id> -o <output_dir>` - Download all activities as GeoJSON files for an athlete
+- `cargo run -- sync -i <athlete_id> -o <output_dir>` - Sync all activities as GeoJSON files for an athlete
 
 ### Environment Configuration
 - **Required**: Create a `.env` file with `INTERVALS_API_KEY=your_api_key_here`
@@ -22,7 +22,7 @@ This is a Rust CLI application for interfacing with the intervals.icu API to ret
 
 ### Testing and Quality
 - `cargo test` - Run tests
-- `cargo clippy` - Run linter
+- `cargo clippy` - Run linter (should be run after code changes)
 - `cargo fmt` - Format code
 
 ## Architecture
@@ -32,7 +32,7 @@ This is a Rust CLI application for interfacing with the intervals.icu API to ret
 - **Commands**: 
   - `list` - Get athlete activities and display them
   - `download` - Download single activity GPX file to specified path
-  - `download-all` - Bulk download all activities as GeoJSON files for an athlete with smart sync
+  - `sync` - Main workflow: sync all activities as GeoJSON files for an athlete with smart sync
 - **HTTP Client**: Uses `reqwest` with retry middleware (`reqwest-retry`) for robust API calls
 - **Data Format**: CSV parsing for activities list using `serde` and `csv` crate
 - **GeoJSON Conversion**: Automatic conversion of GPX data to GeoJSON format using `geojson` and `gpx` crates
@@ -48,7 +48,7 @@ This is a Rust CLI application for interfacing with the intervals.icu API to ret
 - `Activity` struct captures key fields from CSV: id, name, start_date_local, distance, total_elevation_gain, trainer
 - Full CSV contains extensive fields for power, heart rate, training metrics
 
-### Download-All Features
+### Sync Features
 - **Smart Sync**: Only downloads/updates activities when name, start time, or distance changes
 - **Automatic GeoJSON Conversion**: Downloads GPX data and converts to GeoJSON format automatically
 - **Filename-based Metadata**: Uses format `{YYYY-MM-DD}-{sanitized_name}-{activity_type}-{distance}-{elapsed_time}-{activity_id}.geojson`

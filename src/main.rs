@@ -5,7 +5,9 @@ use std::path::PathBuf;
 mod convert;
 mod download;
 mod intervals_client;
-use download::{download_activity, download_all_activities, list_activities};
+mod sync;
+use download::{download_activity, list_activities};
+use sync::sync_activities;
 
 #[derive(Parser)]
 struct Cli {
@@ -30,12 +32,12 @@ enum Commands {
         #[arg(short, long)]
         path: PathBuf,
     },
-    /// Download all GPX files for an athlete
-    DownloadAll {
+    /// Sync all activities as GeoJSON files for an athlete
+    Sync {
         /// Athlete ID
         #[arg(short, long)]
         id: String,
-        /// Output directory for GPX files
+        /// Output directory for GeoJSON files
         #[arg(short, long)]
         output_dir: PathBuf,
     },
@@ -61,8 +63,8 @@ async fn main() {
                 std::process::exit(1);
             }
         }
-        Commands::DownloadAll { id, output_dir } => {
-            download_all_activities(&api_key, &id, &output_dir).await
+        Commands::Sync { id, output_dir } => {
+            sync_activities(&api_key, &id, &output_dir).await
         }
     }
 }
