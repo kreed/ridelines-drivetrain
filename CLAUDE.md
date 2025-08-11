@@ -35,7 +35,7 @@ This is a Rust CLI application for interfacing with the intervals.icu API to ret
   - `sync` - Main workflow: sync all activities as GeoJSON files (.geojson for GPS data, .stub for no GPS data) for an athlete with smart sync
 - **HTTP Client**: Uses `reqwest` with retry middleware (`reqwest-retry`) for robust API calls
 - **Data Format**: CSV parsing for activities list using `serde` and `csv` crate
-- **GeoJSON Conversion**: Automatic conversion of FIT data to GeoJSON format using `fitparser` and `geojson` crates
+- **GeoJSON Conversion**: Automatic conversion of FIT data to GeoJSON format using `fitparser`, `geojson`, and `geo` crates with gap detection (splits linestrings on gaps >100m)
 - **Authentication**: Basic auth using base64-encoded "API_KEY:{api_key}" format
 
 ### API Integration
@@ -50,7 +50,7 @@ This is a Rust CLI application for interfacing with the intervals.icu API to ret
 
 ### Sync Features
 - **Smart Sync**: Only downloads/updates activities when name, start time, or distance changes
-- **Automatic GeoJSON Conversion**: Downloads FIT data and converts to GeoJSON format automatically (.geojson files), or creates empty stub files (.stub) for activities without GPS data
+- **Automatic GeoJSON Conversion**: Downloads FIT data and converts to GeoJSON format automatically (.geojson files), or creates empty stub files (.stub) for activities without GPS data. Automatically splits tracks on gaps >100m to handle GPS interruptions
 - **Filename-based Metadata**: Uses format `{YYYY-MM-DD}-{sanitized_name}-{activity_type}-{distance}-{elapsed_time}-{activity_id}.geojson` or `.stub`
 - **GPS Detection**: Downloads all activities and creates .geojson files for those with GPS data, .stub files for those without
 - **Progress Reporting**: Shows download progress with `indicatif` progress bar

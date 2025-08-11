@@ -1,5 +1,6 @@
 use geojson::{Feature, FeatureCollection, GeoJson, Geometry, Value};
 use fitparser::{profile::MesgNum, FitDataRecord, Value as FitValue};
+use geo::{point, Haversine, Distance};
 
 
 fn extract_coordinate_from_record(data_record: &FitDataRecord) -> Option<Vec<f64>> {
@@ -46,6 +47,45 @@ fn extract_coordinate_from_record(data_record: &FitDataRecord) -> Option<Vec<f64
     }
 }
 
+fn split_coordinates_on_gaps(coords: Vec<Vec<f64>>, max_gap_meters: f64) -> Vec<Vec<Vec<f64>>> {
+    if coords.len() <= 1 {
+        return vec![coords];
+    }
+    
+    let mut segments = Vec::new();
+    let mut current_segment = Vec::new();
+    
+    for (i, coord) in coords.iter().enumerate() {
+        current_segment.push(coord.clone());
+        
+        // Check gap to next point (if it exists)
+        if let Some(next_coord) = coords.get(i + 1) {
+            // Create geo::Point objects for distance calculation
+            let current_point = point!(x: coord[0], y: coord[1]);  // lon, lat
+            let next_point = point!(x: next_coord[0], y: next_coord[1]);
+            
+            // Calculate distance in meters
+            let distance_meters = Haversine.distance(current_point, next_point);
+            
+            // If gap is too large, start a new segment
+            if distance_meters > max_gap_meters {
+                // Only add segment if it has at least 2 points
+                if current_segment.len() >= 2 {
+                    segments.push(current_segment);
+                }
+                current_segment = Vec::new();
+            }
+        }
+    }
+    
+    // Add the final segment if it has at least 2 points
+    if current_segment.len() >= 2 {
+        segments.push(current_segment);
+    }
+    
+    segments
+}
+
 pub async fn convert_fit_to_geojson(fit_data: &[u8]) -> Result<Option<String>, Box<dyn std::error::Error>> {
     // Parse FIT data
     let fit_data_records = fitparser::from_bytes(fit_data)?;
@@ -66,10 +106,22 @@ pub async fn convert_fit_to_geojson(fit_data: &[u8]) -> Result<Option<String>, B
         return Ok(None);
     }
     
-    // Create GeoJSON FeatureCollection
+    // Split coordinates on gaps larger than 100m
+    let segments = split_coordinates_on_gaps(coords, 100.0);
+    
+    // Return None if no valid segments after splitting
+    if segments.is_empty() {
+        return Ok(None);
+    }
+    
+    // Create GeoJSON FeatureCollection with a single feature containing MultiLineString
     let mut features = Vec::new();
     
-    let geometry = Geometry::new(Value::LineString(coords));
+    let geometry = if segments.len() == 1 {
+        Geometry::new(Value::LineString(segments[0].clone()))
+    } else {
+        Geometry::new(Value::MultiLineString(segments))
+    };
     
     let mut properties = serde_json::Map::new();
     properties.insert("name".to_string(), serde_json::Value::String("FIT Track".to_string()));
