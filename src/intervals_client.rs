@@ -3,8 +3,6 @@ use reqwest::StatusCode;
 use reqwest_middleware::{ClientBuilder, ClientWithMiddleware};
 use reqwest_retry::{RetryTransientMiddleware, policies::ExponentialBackoff};
 use serde::Deserialize;
-use std::fs;
-use std::path::Path;
 
 const ENDPOINT: &str = "https://intervals.icu";
 
@@ -12,7 +10,6 @@ const ENDPOINT: &str = "https://intervals.icu";
 pub enum DownloadError {
     Http(StatusCode),
     Network(reqwest_middleware::Error),
-    Io(std::io::Error),
 }
 
 impl std::fmt::Display for DownloadError {
@@ -20,7 +17,6 @@ impl std::fmt::Display for DownloadError {
         match self {
             DownloadError::Http(status) => write!(f, "HTTP {status}"),
             DownloadError::Network(e) => write!(f, "Network error: {e}"),
-            DownloadError::Io(e) => write!(f, "IO error: {e}"),
         }
     }
 }
@@ -83,8 +79,7 @@ impl IntervalsClient {
     pub async fn download_gpx(
         &self,
         activity_id: &str,
-        file_path: &Path,
-    ) -> Result<(), DownloadError> {
+    ) -> Result<String, DownloadError> {
         let path = format!("{ENDPOINT}/api/v1/activity/{activity_id}/gpx-file");
         let response = self
             .client
@@ -103,9 +98,8 @@ impl IntervalsClient {
             .text()
             .await
             .map_err(|e| DownloadError::Network(reqwest_middleware::Error::Reqwest(e)))?;
-        fs::write(file_path, body).map_err(DownloadError::Io)?;
 
-        Ok(())
+        Ok(body)
     }
 
     fn auth_header(&self) -> String {

@@ -1,4 +1,5 @@
 use crate::intervals_client::{Activity, DownloadError, IntervalsClient};
+use crate::convert::convert_gpx_to_geojson;
 use futures::stream::{self, StreamExt};
 use indicatif::{ProgressBar, ProgressStyle};
 use sanitize_filename::sanitize;
@@ -32,17 +33,19 @@ pub async fn list_activities(api_key: &str, athlete_id: &str) {
     }
 }
 
-pub async fn download_activity(api_key: &str, activity_id: &str, output_path: &Path) {
+pub async fn download_activity(api_key: &str, activity_id: &str, output_path: &Path) -> Result<(), Box<dyn std::error::Error>> {
     let client = IntervalsClient::new(api_key.to_string());
 
-    match client.download_gpx(activity_id, output_path).await {
-        Ok(_) => {
-            println!("GPX file saved to: {}", output_path.display());
-        }
-        Err(e) => {
-            eprintln!("Error downloading GPX for activity {activity_id}: {e}");
-        }
-    }
+    let gpx_data = client
+        .download_gpx(activity_id)
+        .await
+        .inspect_err(|e| eprintln!("Error downloading GPX for activity {activity_id}: {e}"))?;
+
+    fs::write(output_path, gpx_data)
+        .inspect_err(|e| eprintln!("Error writing GPX file to {}: {}", output_path.display(), e))?;
+
+    println!("GPX file saved to: {}", output_path.display());
+    Ok(())
 }
 
 pub async fn download_all_activities(api_key: &str, athlete_id: &str, output_dir: &Path) {
@@ -69,8 +72,8 @@ pub async fn download_all_activities(api_key: &str, athlete_id: &str, output_dir
         return;
     }
 
-    // Get all existing GPX files (all are potentially orphaned initially)
-    let orphaned_files = get_existing_gpx_files(output_dir);
+    // Get all existing GeoJSON files (all are potentially orphaned initially)
+    let orphaned_files = get_existing_geojson_files(output_dir);
 
     // Set up progress bar
     let pb = ProgressBar::new(activities.len() as u64);
@@ -137,10 +140,34 @@ pub async fn download_all_activities(api_key: &str, athlete_id: &str, output_dir
 
                 if needs_download {
                     // Download with retry logic handled by middleware
-                    match client.download_gpx(&activity.id, &file_path).await {
-                        Ok(_) => {
-                            if let Ok(mut stats) = stats.lock() {
-                                stats.downloaded += 1;
+                    match client.download_gpx(&activity.id).await {
+                        Ok(gpx_data) => {
+                            // Convert GPX to GeoJSON
+                            let geojson_data = match convert_gpx_to_geojson(&gpx_data).await {
+                                Ok(data) => data,
+                                Err(e) => {
+                                    eprintln!("Failed to convert GPX to GeoJSON for activity {}: {}", activity.id, e);
+                                    if let Ok(mut stats) = stats.lock() {
+                                        stats.failed += 1;
+                                    }
+                                    return;
+                                }
+                            };
+
+                            // Write GeoJSON file instead of GPX
+                            let geojson_path = file_path.with_extension("geojson");
+                            match fs::write(&geojson_path, geojson_data) {
+                                Ok(_) => {
+                                    if let Ok(mut stats) = stats.lock() {
+                                        stats.downloaded += 1;
+                                    }
+                                }
+                                Err(e) => {
+                                    eprintln!("Failed to write GeoJSON file for activity {}: {}", activity.id, e);
+                                    if let Ok(mut stats) = stats.lock() {
+                                        stats.failed += 1;
+                                    }
+                                }
                             }
                         }
                         Err(DownloadError::Http(status)) if status.as_u16() == 422 => {
@@ -208,13 +235,13 @@ pub async fn download_all_activities(api_key: &str, athlete_id: &str, output_dir
     }
 }
 
-fn get_existing_gpx_files(output_dir: &Path) -> HashSet<String> {
+fn get_existing_geojson_files(output_dir: &Path) -> HashSet<String> {
     let mut files = HashSet::new();
 
     if let Ok(entries) = fs::read_dir(output_dir) {
         for entry in entries.flatten() {
             if let Some(filename) = entry.file_name().to_str() {
-                if filename.ends_with(".gpx") {
+                if filename.ends_with(".geojson") {
                     files.insert(filename.to_string());
                 }
             }
@@ -232,7 +259,7 @@ fn generate_filename(activity: &Activity) -> String {
     let elapsed_time_str = format_elapsed_time(activity.elapsed_time);
 
     format!(
-        "{}-{}-{}-{}-{}-{}.gpx",
+        "{}-{}-{}-{}-{}-{}.geojson",
         date, sanitized_name, sanitized_type, distance_str, elapsed_time_str, activity.id
     )
 }
