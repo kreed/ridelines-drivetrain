@@ -138,7 +138,7 @@ pub async fn sync_activities(api_key: &str, athlete_id: &str, output_dir: &Path)
                 match client.download_fit(&activity.id).await {
                     Ok(fit_data) => {
                         // Convert FIT to GeoJSON
-                        match convert_fit_to_geojson(&fit_data).await {
+                        match convert_fit_to_geojson(&fit_data, &activity).await {
                             Ok(Some(data)) => {
                                 // Write GeoJSON file with data
                                 match fs::write(&geojson_path, data) {

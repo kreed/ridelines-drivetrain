@@ -87,6 +87,7 @@ fn split_coordinates_on_gaps(coords: Vec<Vec<f64>>, max_gap_meters: f64) -> Vec<
 
 pub async fn convert_fit_to_geojson(
     fit_data: &[u8],
+    activity: &crate::intervals_client::Activity,
 ) -> Result<Option<String>, Box<dyn std::error::Error>> {
     // Parse FIT data
     let fit_data_records = fitparser::from_bytes(fit_data)?;
@@ -127,11 +128,19 @@ pub async fn convert_fit_to_geojson(
     let mut properties = serde_json::Map::new();
     properties.insert(
         "name".to_string(),
-        serde_json::Value::String("FIT Track".to_string()),
+        serde_json::Value::String(activity.name.clone()),
+    );
+    properties.insert(
+        "date".to_string(),
+        serde_json::Value::String(activity.start_date_local.clone()),
     );
     properties.insert(
         "type".to_string(),
-        serde_json::Value::String("track".to_string()),
+        serde_json::Value::String(activity.activity_type.clone()),
+    );
+    properties.insert(
+        "id".to_string(),
+        serde_json::Value::String(activity.id.clone()),
     );
 
     let feature = Feature {
