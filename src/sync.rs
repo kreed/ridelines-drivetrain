@@ -43,8 +43,8 @@ pub async fn sync_activities(api_key: &str, athlete_id: &str, output_dir: &Path)
         return;
     }
 
-    // Get all existing GeoJSON files (all are potentially orphaned initially)
-    let orphaned_files = get_existing_geojson_files(output_dir);
+    // Get all existing activity files (all are potentially orphaned initially)
+    let orphaned_files = get_existing_activity_files(output_dir);
 
     // Set up progress bar
     let pb = ProgressBar::new(activities.len() as u64);
@@ -64,7 +64,7 @@ pub async fn sync_activities(api_key: &str, athlete_id: &str, output_dir: &Path)
     }));
 
     // Limit concurrent downloads to avoid overwhelming the server
-    let semaphore = Arc::new(Semaphore::new(8));
+    let semaphore = Arc::new(Semaphore::new(5));
     let pb = Arc::new(pb);
     let client = Arc::new(client);
     let output_dir = Arc::new(output_dir.to_path_buf());
@@ -87,88 +87,106 @@ pub async fn sync_activities(api_key: &str, athlete_id: &str, output_dir: &Path)
                 
                 let expected_filename = generate_filename(&activity);
                 
-                // Remove the expected filename from orphaned files (it's not orphaned)
-                if let Ok(mut orphaned) = orphaned_files.lock() {
-                    orphaned.remove(&expected_filename);
-                }
+                // We'll remove from orphaned files after we know which file we created
                 
-                let file_path = output_dir.join(&expected_filename);
+                let geojson_path = output_dir.join(format!("{expected_filename}.geojson"));
+                let stub_path = output_dir.join(format!("{expected_filename}.stub"));
 
-                // Check if we need to download this activity (file doesn't exist)
-                let needs_download = !file_path.exists();
+                let geojson_exists = geojson_path.exists();
+                let stub_exists = stub_path.exists();
 
-                if needs_download {
-                    let geojson_path = file_path.with_extension("geojson");
-                    
-                    // Helper function to write empty file and update stats
-                    let write_empty_file = || {
-                        match fs::write(&geojson_path, "") {
-                            Ok(_) => {
-                                if let Ok(mut stats) = stats.lock() {
-                                    stats.downloaded_empty.insert(expected_filename.clone());
-                                }
+                // Check for bad state (both files exist) - redownload
+                if geojson_exists && stub_exists {
+                    eprintln!("Warning: Both .geojson and .stub files exist for activity {}, redownloading", activity.id);
+                } else if geojson_exists || stub_exists {
+                    // One file exists, skip and remove both types from orphaned files
+                    if let Ok(mut stats) = stats.lock() {
+                        stats.skipped_unchanged += 1;
+                    }
+                    if let Ok(mut orphaned) = orphaned_files.lock() {
+                        orphaned.remove(&format!("{expected_filename}.geojson"));
+                        orphaned.remove(&format!("{expected_filename}.stub"));
+                    }
+                    pb.inc(1);
+                    return;
+                }
+
+                // Neither file exists, download activity
+                
+                // Helper function to write empty stub file and update stats
+                let write_empty_file = || {
+                    match fs::write(&stub_path, "") {
+                        Ok(_) => {
+                            if let Ok(mut stats) = stats.lock() {
+                                stats.downloaded_empty.insert(expected_filename.clone());
                             }
-                            Err(e) => {
-                                eprintln!("Failed to write empty file for activity {}: {}", activity.id, e);
-                                if let Ok(mut stats) = stats.lock() {
-                                    stats.failed += 1;
-                                }
+                            // Remove the stub file from orphaned files list
+                            if let Ok(mut orphaned) = orphaned_files.lock() {
+                                orphaned.remove(&format!("{expected_filename}.stub"));
                             }
-                        }
-                    };
-                    
-                    // Download with retry logic handled by middleware
-                    match client.download_fit(&activity.id).await {
-                        Ok(fit_data) => {
-                            // Convert FIT to GeoJSON
-                            match convert_fit_to_geojson(&fit_data).await {
-                                Ok(Some(data)) => {
-                                    // Write GeoJSON file with data
-                                    match fs::write(&geojson_path, data) {
-                                        Ok(_) => {
-                                            if let Ok(mut stats) = stats.lock() {
-                                                stats.downloaded += 1;
-                                            }
-                                        }
-                                        Err(e) => {
-                                            eprintln!("Failed to write GeoJSON file for activity {}: {}", activity.id, e);
-                                            if let Ok(mut stats) = stats.lock() {
-                                                stats.failed += 1;
-                                            }
-                                        }
-                                    }
-                                }
-                                Ok(None) => {
-                                    // No GPS data found in FIT file - write empty file
-                                    write_empty_file();
-                                }
-                                Err(e) => {
-                                    eprintln!("Failed to convert FIT to GeoJSON for activity {}: {}", activity.id, e);
-                                    if let Ok(mut stats) = stats.lock() {
-                                        stats.failed += 1;
-                                    }
-                                }
-                            }
-                        }
-                        Err(DownloadError::Http(status)) if status.as_u16() == 422 => {
-                            // HTTP 422 usually means no GPS data available - write empty file
-                            write_empty_file();
                         }
                         Err(e) => {
-                            eprintln!("Failed to download activity {}: {}", activity.id, e);
+                            eprintln!("Failed to write stub file for activity {}: {}", activity.id, e);
                             if let Ok(mut stats) = stats.lock() {
                                 stats.failed += 1;
                             }
                         }
                     }
-                } else if let Ok(mut stats) = stats.lock() {
-                    stats.skipped_unchanged += 1;
+                };
+                
+                // Download with retry logic handled by middleware
+                match client.download_fit(&activity.id).await {
+                    Ok(fit_data) => {
+                        // Convert FIT to GeoJSON
+                        match convert_fit_to_geojson(&fit_data).await {
+                            Ok(Some(data)) => {
+                                // Write GeoJSON file with data
+                                match fs::write(&geojson_path, data) {
+                                    Ok(_) => {
+                                        if let Ok(mut stats) = stats.lock() {
+                                            stats.downloaded += 1;
+                                        }
+                                        // Remove the geojson file from orphaned files list
+                                        if let Ok(mut orphaned) = orphaned_files.lock() {
+                                            orphaned.remove(&format!("{expected_filename}.geojson"));
+                                        }
+                                    }
+                                    Err(e) => {
+                                        eprintln!("Failed to write GeoJSON file for activity {}: {}", activity.id, e);
+                                        if let Ok(mut stats) = stats.lock() {
+                                            stats.failed += 1;
+                                        }
+                                    }
+                                }
+                            }
+                            Ok(None) => {
+                                // No GPS data found in FIT file - write empty file
+                                write_empty_file();
+                            }
+                            Err(e) => {
+                                eprintln!("Failed to convert FIT to GeoJSON for activity {}: {}", activity.id, e);
+                                if let Ok(mut stats) = stats.lock() {
+                                    stats.failed += 1;
+                                }
+                            }
+                        }
+                    }
+                    Err(DownloadError::Http(status)) if status.as_u16() == 422 => {
+                        // HTTP 422 usually means no GPS data available - write empty file
+                        write_empty_file();
+                    }
+                    Err(e) => {
+                        eprintln!("Failed to download activity {}: {}", activity.id, e);
+                        if let Ok(mut stats) = stats.lock() {
+                            stats.failed += 1;
+                        }
+                    }
                 }
 
                 pb.inc(1);
             }
         })
-        .buffer_unordered(8)
+        .buffer_unordered(5)
         .collect::<Vec<_>>()
         .await;
 
@@ -214,13 +232,13 @@ pub async fn sync_activities(api_key: &str, athlete_id: &str, output_dir: &Path)
     }
 }
 
-fn get_existing_geojson_files(output_dir: &Path) -> HashSet<String> {
+fn get_existing_activity_files(output_dir: &Path) -> HashSet<String> {
     let mut files = HashSet::new();
 
     if let Ok(entries) = fs::read_dir(output_dir) {
         for entry in entries.flatten() {
             if let Some(filename) = entry.file_name().to_str() {
-                if filename.ends_with(".geojson") {
+                if filename.ends_with(".geojson") || filename.ends_with(".stub") {
                     files.insert(filename.to_string());
                 }
             }
@@ -238,7 +256,7 @@ fn generate_filename(activity: &Activity) -> String {
     let elapsed_time_str = format_elapsed_time(activity.elapsed_time);
 
     format!(
-        "{}-{}-{}-{}-{}-{}.geojson",
+        "{}-{}-{}-{}-{}-{}",
         date, sanitized_name, sanitized_type, distance_str, elapsed_time_str, activity.id
     )
 }
