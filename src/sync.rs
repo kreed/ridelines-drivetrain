@@ -14,7 +14,7 @@ use tokio::sync::Semaphore;
 pub struct DownloadStats {
     pub downloaded: usize,
     pub skipped_unchanged: usize,
-    pub skipped_no_gps: HashSet<String>,
+    pub downloaded_empty: HashSet<String>,
     pub failed: usize,
     pub deleted: usize,
 }
@@ -58,7 +58,7 @@ pub async fn sync_activities(api_key: &str, athlete_id: &str, output_dir: &Path)
     let stats = Arc::new(Mutex::new(DownloadStats {
         downloaded: 0,
         skipped_unchanged: 0,
-        skipped_no_gps: HashSet::new(),
+        downloaded_empty: HashSet::new(),
         failed: 0,
         deleted: 0,
     }));
@@ -92,56 +92,58 @@ pub async fn sync_activities(api_key: &str, athlete_id: &str, output_dir: &Path)
                     orphaned.remove(&expected_filename);
                 }
                 
-                // Skip activities without GPS data
-                let has_distance = activity.distance.unwrap_or(0.0) > 0.0;
-                let is_zwift = activity.name.to_lowercase().contains("zwift");
-                let skip_trainer_activity = activity.trainer == Some(true) && !is_zwift;
-                if !has_distance || skip_trainer_activity {
-                    if let Ok(mut stats) = stats.lock() {
-                        stats.skipped_no_gps.insert(expected_filename);
-                    }
-                    pb.inc(1);
-                    return;
-                }
-
                 let file_path = output_dir.join(&expected_filename);
 
                 // Check if we need to download this activity (file doesn't exist)
                 let needs_download = !file_path.exists();
 
                 if needs_download {
+                    let geojson_path = file_path.with_extension("geojson");
+                    
+                    // Helper function to write empty file and update stats
+                    let write_empty_file = || {
+                        match fs::write(&geojson_path, "") {
+                            Ok(_) => {
+                                if let Ok(mut stats) = stats.lock() {
+                                    stats.downloaded_empty.insert(expected_filename.clone());
+                                }
+                            }
+                            Err(e) => {
+                                eprintln!("Failed to write empty file for activity {}: {}", activity.id, e);
+                                if let Ok(mut stats) = stats.lock() {
+                                    stats.failed += 1;
+                                }
+                            }
+                        }
+                    };
+                    
                     // Download with retry logic handled by middleware
                     match client.download_fit(&activity.id).await {
                         Ok(fit_data) => {
                             // Convert FIT to GeoJSON
-                            let geojson_data = match convert_fit_to_geojson(&fit_data).await {
-                                Ok(Some(data)) => data,
-                                Ok(None) => {
-                                    // No GPS data found in FIT file
-                                    if let Ok(mut stats) = stats.lock() {
-                                        stats.skipped_no_gps.insert(expected_filename.clone());
+                            match convert_fit_to_geojson(&fit_data).await {
+                                Ok(Some(data)) => {
+                                    // Write GeoJSON file with data
+                                    match fs::write(&geojson_path, data) {
+                                        Ok(_) => {
+                                            if let Ok(mut stats) = stats.lock() {
+                                                stats.downloaded += 1;
+                                            }
+                                        }
+                                        Err(e) => {
+                                            eprintln!("Failed to write GeoJSON file for activity {}: {}", activity.id, e);
+                                            if let Ok(mut stats) = stats.lock() {
+                                                stats.failed += 1;
+                                            }
+                                        }
                                     }
-                                    return;
+                                }
+                                Ok(None) => {
+                                    // No GPS data found in FIT file - write empty file
+                                    write_empty_file();
                                 }
                                 Err(e) => {
                                     eprintln!("Failed to convert FIT to GeoJSON for activity {}: {}", activity.id, e);
-                                    if let Ok(mut stats) = stats.lock() {
-                                        stats.failed += 1;
-                                    }
-                                    return;
-                                }
-                            };
-
-                            // Write GeoJSON file
-                            let geojson_path = file_path.with_extension("geojson");
-                            match fs::write(&geojson_path, geojson_data) {
-                                Ok(_) => {
-                                    if let Ok(mut stats) = stats.lock() {
-                                        stats.downloaded += 1;
-                                    }
-                                }
-                                Err(e) => {
-                                    eprintln!("Failed to write GeoJSON file for activity {}: {}", activity.id, e);
                                     if let Ok(mut stats) = stats.lock() {
                                         stats.failed += 1;
                                     }
@@ -149,9 +151,8 @@ pub async fn sync_activities(api_key: &str, athlete_id: &str, output_dir: &Path)
                             }
                         }
                         Err(DownloadError::Http(status)) if status.as_u16() == 422 => {
-                            if let Ok(mut stats) = stats.lock() {
-                                stats.skipped_no_gps.insert(expected_filename.clone());
-                            }
+                            // HTTP 422 usually means no GPS data available - write empty file
+                            write_empty_file();
                         }
                         Err(e) => {
                             eprintln!("Failed to download activity {}: {}", activity.id, e);
@@ -193,21 +194,21 @@ pub async fn sync_activities(api_key: &str, athlete_id: &str, output_dir: &Path)
     println!("Sync summary:");
     println!("  Downloaded: {}", final_stats.downloaded);
     println!("  Skipped (unchanged): {}", final_stats.skipped_unchanged);
-    println!("  Skipped (no GPS data): {}", final_stats.skipped_no_gps.len());
+    println!("  Downloaded (empty/no GPS): {}", final_stats.downloaded_empty.len());
     println!("  Deleted (obsolete): {}", final_stats.deleted);
     println!("  Errors: {}", final_stats.failed);
 
-    // Write skipped filenames to log file
-    if !final_stats.skipped_no_gps.is_empty() {
-        let log_path = output_dir.join("skipped_no_gps.log");
+    // Write empty filenames to log file
+    if !final_stats.downloaded_empty.is_empty() {
+        let log_path = output_dir.join("downloaded_empty.log");
         match fs::File::create(&log_path) {
             Ok(mut file) => {
-                for filename in &final_stats.skipped_no_gps {
+                for filename in &final_stats.downloaded_empty {
                     writeln!(file, "{filename}").ok();
                 }
             }
             Err(e) => {
-                eprintln!("Warning: Failed to create skipped_no_gps.log: {e}");
+                eprintln!("Warning: Failed to create downloaded_empty.log: {e}");
             }
         }
     }
