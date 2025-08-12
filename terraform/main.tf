@@ -1,0 +1,187 @@
+terraform {
+  required_providers {
+    aws = {
+      source  = "hashicorp/aws"
+      version = "~> 5.0"
+    }
+  }
+  
+  backend "s3" {
+    # Configure these values via terraform init or environment variables
+    # bucket = "your-terraform-state-bucket"
+    # key    = "intervals-mapper/terraform.tfstate"
+    # region = "us-west-2"
+  }
+}
+
+provider "aws" {
+  region = var.aws_region
+}
+
+# IAM role for Lambda
+resource "aws_iam_role" "lambda_role" {
+  name = "${var.project_name}-lambda-role"
+
+  assume_role_policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Action = "sts:AssumeRole"
+        Effect = "Allow"
+        Principal = {
+          Service = "lambda.amazonaws.com"
+        }
+      }
+    ]
+  })
+}
+
+# Attach basic Lambda execution policy
+resource "aws_iam_role_policy_attachment" "lambda_basic_execution" {
+  role       = aws_iam_role.lambda_role.name
+  policy_arn = "arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole"
+}
+
+# CloudWatch log group
+resource "aws_cloudwatch_log_group" "lambda_logs" {
+  name              = "/aws/lambda/${var.project_name}"
+  retention_in_days = 14
+}
+
+# S3 bucket for storing GeoJSON files
+resource "aws_s3_bucket" "geojson_storage" {
+  bucket = "${var.project_name}-geojson-${random_id.bucket_suffix.hex}"
+}
+
+resource "random_id" "bucket_suffix" {
+  byte_length = 4
+}
+
+resource "aws_s3_bucket_versioning" "geojson_storage_versioning" {
+  bucket = aws_s3_bucket.geojson_storage.id
+  versioning_configuration {
+    status = "Enabled"
+  }
+}
+
+resource "aws_s3_bucket_server_side_encryption_configuration" "geojson_storage_encryption" {
+  bucket = aws_s3_bucket.geojson_storage.id
+
+  rule {
+    apply_server_side_encryption_by_default {
+      sse_algorithm = "AES256"
+    }
+  }
+}
+
+# AWS Secrets Manager secret for Intervals API key
+resource "aws_secretsmanager_secret" "intervals_api_key" {
+  name = "${var.project_name}-intervals-api-key"
+  description = "API key for intervals.icu"
+}
+
+resource "aws_secretsmanager_secret_version" "intervals_api_key" {
+  secret_id     = aws_secretsmanager_secret.intervals_api_key.id
+  secret_string = var.intervals_api_key
+}
+
+# IAM policy for S3 access
+resource "aws_iam_role_policy" "lambda_s3_policy" {
+  name = "${var.project_name}-s3-policy"
+  role = aws_iam_role.lambda_role.id
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect = "Allow"
+        Action = [
+          "s3:GetObject",
+          "s3:PutObject",
+          "s3:DeleteObject",
+          "s3:ListBucket"
+        ]
+        Resource = [
+          aws_s3_bucket.geojson_storage.arn,
+          "${aws_s3_bucket.geojson_storage.arn}/*"
+        ]
+      }
+    ]
+  })
+}
+
+# IAM policy for Secrets Manager access
+resource "aws_iam_role_policy" "lambda_secrets_policy" {
+  name = "${var.project_name}-secrets-policy"
+  role = aws_iam_role.lambda_role.id
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect = "Allow"
+        Action = [
+          "secretsmanager:GetSecretValue"
+        ]
+        Resource = [
+          aws_secretsmanager_secret.intervals_api_key.arn
+        ]
+      }
+    ]
+  })
+}
+
+# Lambda function
+resource "aws_lambda_function" "intervals_mapper" {
+  filename         = "target/lambda/${var.project_name}.zip"
+  function_name    = var.project_name
+  role            = aws_iam_role.lambda_role.arn
+  handler         = "bootstrap"
+  runtime         = "provided.al2023"
+  timeout         = 300
+  memory_size     = 512
+
+  environment {
+    variables = {
+      SECRETS_MANAGER_SECRET_ARN = aws_secretsmanager_secret.intervals_api_key.arn
+      S3_BUCKET                 = aws_s3_bucket.geojson_storage.bucket
+      RUST_LOG                  = "info"
+    }
+  }
+
+  depends_on = [
+    aws_iam_role_policy_attachment.lambda_basic_execution,
+    aws_cloudwatch_log_group.lambda_logs,
+  ]
+}
+
+# Lambda function URL (optional - for HTTP access)
+resource "aws_lambda_function_url" "intervals_mapper_url" {
+  count              = var.enable_function_url ? 1 : 0
+  function_name      = aws_lambda_function.intervals_mapper.function_name
+  authorization_type = "NONE"
+}
+
+# EventBridge rule for scheduled execution (optional)
+resource "aws_cloudwatch_event_rule" "schedule" {
+  count               = var.enable_scheduled_execution ? 1 : 0
+  name                = "${var.project_name}-schedule"
+  description         = "Trigger intervals-mapper Lambda function"
+  schedule_expression = var.schedule_expression
+}
+
+resource "aws_cloudwatch_event_target" "lambda_target" {
+  count     = var.enable_scheduled_execution ? 1 : 0
+  rule      = aws_cloudwatch_event_rule.schedule[0].name
+  target_id = "IntervalsMapperLambda"
+  arn       = aws_lambda_function.intervals_mapper.arn
+}
+
+resource "aws_lambda_permission" "allow_eventbridge" {
+  count         = var.enable_scheduled_execution ? 1 : 0
+  statement_id  = "AllowExecutionFromEventBridge"
+  action        = "lambda:InvokeFunction"
+  function_name = aws_lambda_function.intervals_mapper.function_name
+  principal     = "events.amazonaws.com"
+  source_arn    = aws_cloudwatch_event_rule.schedule[0].arn
+}

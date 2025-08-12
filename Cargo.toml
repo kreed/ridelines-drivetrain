@@ -3,6 +3,10 @@ name = "intervals-mapper"
 version = "0.1.0"
 edition = "2024"
 
+[features]
+default = []
+lambda = ["lambda_runtime", "aws-sdk-s3", "aws-sdk-secretsmanager", "aws-config"]
+
 [dependencies]
 reqwest = "0.12.22"
 reqwest-retry = "0.7.0"
@@ -22,3 +26,7 @@ geojson = "0.24"
 geo-types = "0.7"
 geo = "0.30.0"
 fitparser = "0.10.0"
+lambda_runtime = { version = "0.8", optional = true }
+aws-sdk-s3 = { version = "1.0", optional = true }
+aws-sdk-secretsmanager = { version = "1.0", optional = true }
+aws-config = { version = "1.0", optional = true }

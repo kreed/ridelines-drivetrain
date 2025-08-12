@@ -1,68 +1,23 @@
-use clap::{Parser, Subcommand};
-use std::env;
-use std::path::PathBuf;
-
 mod convert;
-mod download;
 mod intervals_client;
 mod sync;
-use download::{download_activity, list_activities};
-use sync::sync_activities;
 
-#[derive(Parser)]
-struct Cli {
-    #[command(subcommand)]
-    command: Commands,
-}
+#[cfg(not(feature = "lambda"))]
+mod cli;
 
-#[derive(Subcommand)]
-enum Commands {
-    /// List activities for an athlete
-    List {
-        /// Athlete ID
-        #[arg(short, long)]
-        id: String,
-    },
-    /// Download FIT file for a specific activity
-    Download {
-        /// Activity ID
-        #[arg(short, long)]
-        id: String,
-        /// Path to save the FIT file
-        #[arg(short, long)]
-        path: PathBuf,
-    },
-    /// Sync all activities as GeoJSON files for an athlete
-    Sync {
-        /// Athlete ID
-        #[arg(short, long)]
-        id: String,
-        /// Output directory for GeoJSON files
-        #[arg(short, long)]
-        output_dir: PathBuf,
-    },
-}
+#[cfg(feature = "lambda")]
+mod lambda_handler;
 
+#[cfg(not(feature = "lambda"))]
 #[tokio::main]
 async fn main() {
-    dotenv::dotenv().ok();
-    let args = Cli::parse();
+    cli::cli_main().await;
+}
 
-    let api_key = match env::var("INTERVALS_API_KEY") {
-        Ok(key) => key,
-        Err(_) => {
-            eprintln!("Error: INTERVALS_API_KEY environment variable must be set");
-            std::process::exit(1);
-        }
-    };
-
-    match args.command {
-        Commands::List { id } => list_activities(&api_key, &id).await,
-        Commands::Download { id, path } => {
-            if download_activity(&api_key, &id, &path).await.is_err() {
-                std::process::exit(1);
-            }
-        }
-        Commands::Sync { id, output_dir } => sync_activities(&api_key, &id, &output_dir).await,
-    }
+#[cfg(feature = "lambda")]
+#[tokio::main] 
+async fn main() -> Result<(), lambda_runtime::Error> {
+    use lambda_runtime::{run, service_fn};
+    let func = service_fn(lambda_handler::function_handler);
+    run(func).await
 }
