@@ -5,7 +5,7 @@ terraform {
       version = "~> 5.0"
     }
   }
-  
+
   backend "s3" {
     # Configure these values via terraform init or environment variables
     # bucket = "your-terraform-state-bucket"
@@ -76,7 +76,7 @@ resource "aws_s3_bucket_server_side_encryption_configuration" "geojson_storage_e
 
 # AWS Secrets Manager secret for Intervals API key
 resource "aws_secretsmanager_secret" "intervals_api_key" {
-  name = "${var.project_name}-intervals-api-key"
+  name        = "${var.project_name}-intervals-api-key"
   description = "API key for intervals.icu"
 }
 
@@ -133,19 +133,19 @@ resource "aws_iam_role_policy" "lambda_secrets_policy" {
 
 # Lambda function
 resource "aws_lambda_function" "intervals_mapper" {
-  filename         = "target/lambda/${var.project_name}.zip"
-  function_name    = var.project_name
-  role            = aws_iam_role.lambda_role.arn
-  handler         = "bootstrap"
-  runtime         = "provided.al2023"
-  timeout         = 300
-  memory_size     = 512
+  filename      = "target/lambda/${var.project_name}.zip"
+  function_name = var.project_name
+  role          = aws_iam_role.lambda_role.arn
+  handler       = "bootstrap"
+  runtime       = "provided.al2023"
+  timeout       = 300
+  memory_size   = 512
 
   environment {
     variables = {
       SECRETS_MANAGER_SECRET_ARN = aws_secretsmanager_secret.intervals_api_key.arn
-      S3_BUCKET                 = aws_s3_bucket.geojson_storage.bucket
-      RUST_LOG                  = "info"
+      S3_BUCKET                  = aws_s3_bucket.geojson_storage.bucket
+      RUST_LOG                   = "info"
     }
   }
 

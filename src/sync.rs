@@ -240,10 +240,10 @@ fn get_existing_activity_files(output_dir: &Path) -> HashSet<String> {
 
     if let Ok(entries) = fs::read_dir(output_dir) {
         for entry in entries.flatten() {
-            if let Some(filename) = entry.file_name().to_str() {
-                if filename.ends_with(".geojson") || filename.ends_with(".stub") {
-                    files.insert(filename.to_string());
-                }
+            if let Some(filename) = entry.file_name().to_str()
+                && (filename.ends_with(".geojson") || filename.ends_with(".stub"))
+            {
+                files.insert(filename.to_string());
             }
         }
     }

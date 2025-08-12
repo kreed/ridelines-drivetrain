@@ -96,10 +96,10 @@ pub async fn convert_fit_to_geojson(
     let mut coords: Vec<Vec<f64>> = Vec::new();
 
     for data_record in fit_data_records {
-        if data_record.kind() == MesgNum::Record {
-            if let Some(coord) = extract_coordinate_from_record(&data_record) {
-                coords.push(coord);
-            }
+        if data_record.kind() == MesgNum::Record
+            && let Some(coord) = extract_coordinate_from_record(&data_record)
+        {
+            coords.push(coord);
         }
     }
 
