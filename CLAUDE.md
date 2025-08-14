@@ -4,21 +4,23 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-This is a Rust AWS Lambda function for interfacing with the intervals.icu API to retrieve athlete activity data and sync it to S3. The function downloads FIT files and converts them to GeoJSON format for mapping and analysis.
+This is a Rust AWS Lambda function for interfacing with the intervals.icu API to retrieve athlete activity data, sync it to S3, and generate vector tiles. The function downloads FIT files, converts them to GeoJSON format, and uses Tippecanoe to create MBTiles for efficient web mapping.
 
 ## Development Commands
 
 ### Building and Deployment
 - `cargo build` - Build the project for local development/testing
 - `cargo lambda build --release` - Build optimized Lambda function package
+- Build tippecanoe layer using GitHub Actions workflow: `.github/workflows/build-layer.yml`
 - `tofu init` - Initialize Terraform in terraform/ directory  
 - `tofu plan` - Preview infrastructure changes
 - `tofu apply` - Deploy Lambda function and AWS resources
-- Lambda function syncs activities directly to S3 bucket when invoked via EventBridge
+- Lambda function syncs activities to S3 and generates MBTiles when invoked via EventBridge
 
 ### Environment Configuration
 - **API Key**: Stored in AWS Secrets Manager, configured via Terraform
-- **S3 Bucket**: Auto-created by Terraform for storing GeoJSON files
+- **S3 Bucket**: Auto-created by Terraform for storing GeoJSON files and MBTiles
+- **Tippecanoe Layer**: Custom-built Lambda layer with tippecanoe binaries (deployed via GitHub Actions)
 - **Environment Variables**: `SECRETS_MANAGER_SECRET_ARN`, `S3_BUCKET`, `RUST_LOG=info`
 - **Lambda Trigger**: EventBridge event with `athlete_id` in detail field
 
@@ -30,8 +32,9 @@ This is a Rust AWS Lambda function for interfacing with the intervals.icu API to
 ## Architecture
 
 ### Core Structure
-- **Lambda Handler**: EventBridge-triggered function for syncing athlete activities to S3
+- **Lambda Handler**: EventBridge-triggered function for syncing athlete activities to S3 and generating vector tiles
 - **Sync Workflow**: Downloads all activities as GeoJSON files (.geojson for GPS data, .stub for no GPS data) with smart sync capabilities
+- **Vector Tile Generation**: Uses Tippecanoe to convert GeoJSON data into optimized MBTiles format
 - **HTTP Client**: Uses `reqwest` with `rustls-tls` and retry middleware (`reqwest-retry`) for robust API calls
 - **Data Format**: CSV parsing for activities list using `serde` and `csv` crate
 - **GeoJSON Conversion**: Automatic conversion of FIT data to GeoJSON format using `fitparser`, `geojson`, and `geo` crates with gap detection (splits linestrings on gaps >100m)
@@ -58,15 +61,17 @@ This is a Rust AWS Lambda function for interfacing with the intervals.icu API to
 - **Filename Sanitization**: Uses `sanitize-filename` crate for safe, cross-platform filenames
 - **Cleanup**: Removes orphaned activity files (.geojson and .stub) for activities no longer present on intervals.icu
 - **Statistics**: Reports downloaded, skipped (unchanged), downloaded (empty/no GPS), failed, and deleted counts
-- **File Concatenation**: Creates `athletes/{athlete_id}/all-activities.dat` containing all GeoJSON files concatenated together
+- **Vector Tile Generation**: Concatenates all GeoJSON files and processes them with Tippecanoe to create `athletes/{athlete_id}/{athlete_id}.mbtiles`
 - **Concurrent Processing**: Uses semaphore-controlled concurrency (5 concurrent downloads) with async/await
+- **Tippecanoe Integration**: Executes tippecanoe with `--preserve-input-order -fl activities` for optimal web mapping performance
 
 ### AWS Infrastructure
-- **S3 Storage**: Activities stored as individual .geojson/.stub files plus concatenated .dat file
+- **S3 Storage**: Activities stored as individual .geojson/.stub files plus final .mbtiles vector tiles
 - **Secrets Manager**: Secure API key storage with IAM-restricted access
-- **Lambda Configuration**: 2048MB memory, 10-minute timeout, optimized binary (4.6MB)
-- **Terraform Management**: Complete infrastructure as code with state management
-- **GitHub Actions**: Automated build, test, and deployment pipeline
+- **Lambda Configuration**: 2048MB memory, 10-minute timeout, optimized binary (4.6MB) with custom Tippecanoe layer
+- **Custom Lambda Layer**: Tippecanoe binaries built from source via GitHub Actions and deployed to AWS
+- **Terraform Management**: Complete infrastructure as code with state management and SSM Parameter Store integration
+- **GitHub Actions**: Automated build, test, layer creation, and deployment pipeline
 
 ### SyncJob Architecture
 - **Struct-based Design**: `SyncJob` encapsulates all sync logic with dependency injection

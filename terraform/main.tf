@@ -16,6 +16,11 @@ provider "aws" {
   region = var.aws_region
 }
 
+# Data source to get the tippecanoe layer ARN from SSM
+data "aws_ssm_parameter" "tippecanoe_layer_arn" {
+  name = "/intervals-mapper/tippecanoe-layer-arn"
+}
+
 # IAM role for Lambda
 resource "aws_iam_role" "lambda_role" {
   name = "${var.project_name}-lambda-role"
@@ -134,6 +139,10 @@ resource "aws_lambda_function" "intervals_mapper" {
   timeout          = 600
   memory_size      = 2048
   source_code_hash = filebase64sha256("../target/lambda/${var.project_name}/bootstrap.zip")
+
+  layers = [
+    data.aws_ssm_parameter.tippecanoe_layer_arn.value
+  ]
 
   environment {
     variables = {

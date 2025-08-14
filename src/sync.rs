@@ -5,8 +5,10 @@ use aws_sdk_s3::primitives::ByteStream;
 use futures::stream::{self, StreamExt};
 use sanitize_filename::sanitize;
 use std::collections::HashSet;
+use std::process::Command;
 use std::sync::{Arc, Mutex};
 use tokio::sync::Semaphore;
+use tokio::fs;
 use tracing::{info, warn, error};
 
 #[derive(Debug)]
@@ -281,7 +283,7 @@ impl SyncJob {
     }
 
     async fn concatenate_geojson_files(&self) {
-        info!("Starting GeoJSON file concatenation");
+        info!("Starting GeoJSON file concatenation and MBTiles generation");
         
         // Get all .geojson files
         let geojson_files = match self.list_activity_files(&[".geojson"]).await {
@@ -293,13 +295,17 @@ impl SyncJob {
         };
         
         if geojson_files.is_empty() {
-            info!("No GeoJSON files found to concatenate");
+            info!("No GeoJSON files found to process");
             return;
         }
         
-        info!("Found {} GeoJSON files to concatenate", geojson_files.len());
+        info!("Found {} GeoJSON files to process", geojson_files.len());
         
-        // Concatenate all file contents
+        // Create temporary files
+        let temp_data_file = format!("/tmp/all-activities-{}.dat", self.athlete_id);
+        let temp_mbtiles_file = format!("/tmp/{}.mbtiles", self.athlete_id);
+        
+        // Concatenate all file contents to temp file
         let mut concatenated_content = String::new();
         let mut successful_files = 0;
         
@@ -317,20 +323,41 @@ impl SyncJob {
         }
         
         if successful_files == 0 {
-            warn!("No files could be read for concatenation");
+            warn!("No files could be read for processing");
             return;
         }
         
-        // Write concatenated file to S3
-        let concatenated_key = format!("athletes/{}/all-activities.dat", self.athlete_id);
-        match self.write_concatenated_file(&concatenated_key, concatenated_content).await {
+        // Write concatenated content to temp file
+        if let Err(e) = fs::write(&temp_data_file, concatenated_content).await {
+            error!("Failed to write temporary data file: {}", e);
+            return;
+        }
+        
+        info!("Successfully created temporary file with {} activities", successful_files);
+        
+        // Run tippecanoe to generate MBTiles
+        match self.run_tippecanoe(&temp_data_file, &temp_mbtiles_file).await {
             Ok(_) => {
-                info!("Successfully created concatenated file with {} activities", successful_files);
+                info!("Successfully generated MBTiles file");
+                
+                // Upload MBTiles to S3
+                match self.upload_mbtiles(&temp_mbtiles_file).await {
+                    Ok(_) => {
+                        info!("Successfully uploaded MBTiles to S3");
+                    }
+                    Err(e) => {
+                        error!("Failed to upload MBTiles to S3: {}", e);
+                    }
+                }
             }
             Err(e) => {
-                error!("Failed to write concatenated file: {}", e);
+                error!("Failed to generate MBTiles: {}", e);
             }
         }
+        
+        // Clean up temp files
+        let _ = fs::remove_file(&temp_data_file).await;
+        let _ = fs::remove_file(&temp_mbtiles_file).await;
     }
 
     async fn get_file_content(&self, key: &str) -> Result<String, Box<dyn std::error::Error>> {
@@ -346,16 +373,57 @@ impl SyncJob {
         Ok(content)
     }
 
-    async fn write_concatenated_file(&self, key: &str, content: String) -> Result<(), Box<dyn std::error::Error>> {
+    async fn run_tippecanoe(&self, input_file: &str, output_file: &str) -> Result<(), Box<dyn std::error::Error>> {
+        info!("Running tippecanoe: {} -> {}", input_file, output_file);
+        
+        let output = Command::new("/opt/bin/tippecanoe")
+            .args([
+                "--preserve-input-order",
+                "-fl", "activities",
+                "-o", output_file,
+                input_file
+            ])
+            .output()
+            .map_err(|e| format!("Failed to execute tippecanoe: {e}"))?;
+        
+        if !output.status.success() {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            let stdout = String::from_utf8_lossy(&output.stdout);
+            error!("Tippecanoe failed with status: {}", output.status);
+            error!("Stderr: {}", stderr);
+            error!("Stdout: {}", stdout);
+            return Err(format!("Tippecanoe failed: {stderr}").into());
+        }
+        
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        if !stdout.is_empty() {
+            info!("Tippecanoe output: {}", stdout);
+        }
+        
+        Ok(())
+    }
+
+    async fn upload_mbtiles(&self, mbtiles_file: &str) -> Result<(), Box<dyn std::error::Error>> {
+        info!("Uploading MBTiles file to S3: {}", mbtiles_file);
+        
+        // Read the MBTiles file
+        let file_content = fs::read(mbtiles_file).await
+            .map_err(|e| format!("Failed to read MBTiles file: {e}"))?;
+        
+        // Upload to S3
+        let s3_key = format!("athletes/{}/{}.mbtiles", self.athlete_id, self.athlete_id);
+        
         self.s3_client
             .put_object()
             .bucket(&self.s3_bucket)
-            .key(key)
-            .body(ByteStream::from(content.into_bytes()))
-            .content_type("text/plain")
+            .key(&s3_key)
+            .body(ByteStream::from(file_content))
+            .content_type("application/vnd.mapbox-vector-tile")
             .send()
-            .await?;
-            
+            .await
+            .map_err(|e| format!("Failed to upload MBTiles to S3: {e}"))?;
+        
+        info!("Successfully uploaded MBTiles to S3: {}", s3_key);
         Ok(())
     }
 

@@ -1,0 +1,122 @@
+name: Build Tippecanoe Lambda Layer
+
+on:
+  push:
+    paths:
+      - '.github/workflows/build-layer.yml'
+  workflow_dispatch:
+    inputs:
+      tippecanoe_version:
+        description: 'Tippecanoe version/branch to build'
+        required: true
+        default: 'main'
+
+env:
+  AWS_REGION: us-west-2
+
+jobs:
+  build-layer:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+    - uses: actions/checkout@v5
+    
+    - name: Configure AWS credentials
+      uses: aws-actions/configure-aws-credentials@v4
+      with:
+        role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+        aws-region: ${{ env.AWS_REGION }}
+    
+    - name: Build tippecanoe layer
+      run: |
+        # Create layer directory structure
+        mkdir -p layer/bin layer/lib
+        
+        # Build tippecanoe in Docker container compatible with Lambda runtime
+        cat > Dockerfile.layer << 'EOF'
+        FROM public.ecr.aws/lambda/provided:al2023
+        
+        # Install build dependencies
+        RUN yum update -y && \
+            yum install -y gcc-c++ make sqlite-devel zlib-devel git
+        
+        # Clone and build tippecanoe
+        WORKDIR /build
+        RUN git clone https://github.com/felt/tippecanoe.git
+        WORKDIR /build/tippecanoe
+        ARG TIPPECANOE_VERSION=main
+        RUN git checkout ${TIPPECANOE_VERSION}
+        RUN make
+        
+        # Copy binaries and dependencies
+        RUN mkdir -p /layer/bin /layer/lib
+        RUN cp tippecanoe tile-join /layer/bin/
+        RUN ldd /layer/bin/tippecanoe | grep "=> /" | awk '{print $3}' | xargs -I '{}' cp '{}' /layer/lib/ || true
+        RUN ldd /layer/bin/tile-join | grep "=> /" | awk '{print $3}' | xargs -I '{}' cp '{}' /layer/lib/ || true
+        
+        # Make binaries executable
+        RUN chmod +x /layer/bin/*
+        EOF
+        
+        # Build the layer
+        docker build -f Dockerfile.layer --build-arg TIPPECANOE_VERSION=${{ github.event.inputs.tippecanoe_version || 'main' }} -t tippecanoe-layer .
+        
+        # Extract layer contents
+        docker create --name temp-container tippecanoe-layer
+        docker cp temp-container:/layer/. layer/
+        docker rm temp-container
+        
+        # Create layer zip
+        cd layer
+        zip -r ../tippecanoe-layer.zip .
+        cd ..
+        
+        echo "Layer contents:"
+        ls -la layer/bin/
+        ls -la layer/lib/
+        
+    - name: Upload layer to AWS
+      run: |
+        # Create or update Lambda layer
+        LAYER_NAME="${{ vars.PROJECT_NAME || 'intervals-mapper' }}-tippecanoe"
+        
+        echo "Publishing layer: $LAYER_NAME"
+        
+        LAYER_VERSION=$(aws lambda publish-layer-version \
+          --layer-name "$LAYER_NAME" \
+          --zip-file fileb://tippecanoe-layer.zip \
+          --description "Tippecanoe binaries for vector tile generation (built from ${{ github.event.inputs.tippecanoe_version || 'main' }})" \
+          --compatible-runtimes provided.al2023 \
+          --query 'Version' \
+          --output text)
+        
+        echo "Created layer version: $LAYER_VERSION"
+        
+        LAYER_ARN=$(aws lambda get-layer-version \
+          --layer-name "$LAYER_NAME" \
+          --version-number "$LAYER_VERSION" \
+          --query 'LayerVersionArn' \
+          --output text)
+        
+        echo "Layer ARN: $LAYER_ARN"
+        echo "TIPPECANOE_LAYER_ARN=$LAYER_ARN" >> $GITHUB_ENV
+        
+        # Save layer ARN to output for other workflows
+        echo "::notice title=Layer Created::Tippecanoe layer created with ARN: $LAYER_ARN"
+        
+    - name: Store layer ARN for Terraform
+      run: |
+        # Store the layer ARN in a way that Terraform can reference it
+        echo "Tippecanoe layer created successfully!"
+        echo "Add this to your Terraform lambda function:"
+        echo "layers = [\"$TIPPECANOE_LAYER_ARN\"]"
+        
+        # Optionally store in SSM Parameter for Terraform data source
+        aws ssm put-parameter \
+          --name "/intervals-mapper/tippecanoe-layer-arn" \
+          --value "$TIPPECANOE_LAYER_ARN" \
+          --type "String" \
+          --description "ARN of the tippecanoe Lambda layer" \
+          --overwrite
