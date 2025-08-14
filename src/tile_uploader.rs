@@ -44,9 +44,12 @@ impl TileUploader {
             let (z, x, y, tile_data) = tile_result
                 .map_err(|e| format!("Failed to read tile: {e}"))?;
             
+            // Flip Y coordinate from TMS to XYZ coordinate system
+            let y_flipped = 2i32.pow(z as u32) - 1 - y;
+
             // Create S3 key in the standard tile server format: z/x/y.pbf
             let s3_key = format!("strava/{}/{}/{}/{}.pbf", 
-                self.athlete_id, z, x, y);
+                self.athlete_id, z, x, y_flipped);
             
             // Upload tile data to S3
             self.s3_client
