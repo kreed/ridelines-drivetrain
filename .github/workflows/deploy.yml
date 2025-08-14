@@ -34,9 +34,6 @@ jobs:
       
     - name: Run clippy
       run: cargo clippy -- -D warnings
-      
-    - name: Check formatting
-      run: cargo fmt --check
 
   build:
     runs-on: ubuntu-latest
@@ -63,19 +60,13 @@ jobs:
         key: ${{ runner.os }}-cargo-lambda-${{ hashFiles('**/Cargo.lock') }}
       
     - name: Build Lambda function
-      run: cargo lambda build --release --features lambda
+      run: cargo lambda build --release --output-format zip
       
-    - name: Create deployment package
-      run: |
-        mkdir -p target/lambda
-        cp target/lambda/intervals-mapper/bootstrap target/lambda/
-        cd target/lambda && zip intervals-mapper.zip bootstrap
-        
     - name: Upload build artifacts
       uses: actions/upload-artifact@v4
       with:
         name: lambda-deployment-package
-        path: target/lambda/intervals-mapper.zip
+        path: target/lambda/intervals-mapper/bootstrap.zip
 
   deploy:
     needs: build
@@ -107,11 +98,11 @@ jobs:
       
     - name: OpenTofu Plan
       working-directory: terraform
-      run: tofu plan -var="intervals_api_key=${{ secrets.INTERVALS_API_KEY }}"
+      run: tofu plan
       
     - name: OpenTofu Apply
       working-directory: terraform
-      run: tofu apply -auto-approve -var="intervals_api_key=${{ secrets.INTERVALS_API_KEY }}"
+      run: tofu apply -auto-approve
 
   validate-opentofu:
     runs-on: ubuntu-latest

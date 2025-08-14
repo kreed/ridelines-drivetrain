@@ -7,10 +7,8 @@ terraform {
   }
 
   backend "s3" {
-    # Configure these values via terraform init or environment variables
-    # bucket = "your-terraform-state-bucket"
-    # key    = "intervals-mapper/terraform.tfstate"
-    # region = "us-west-2"
+    bucket = "tofu-042666117628"
+    key    = "intervals-mapper/terraform.tfstate"
   }
 }
 
@@ -80,11 +78,6 @@ resource "aws_secretsmanager_secret" "intervals_api_key" {
   description = "API key for intervals.icu"
 }
 
-resource "aws_secretsmanager_secret_version" "intervals_api_key" {
-  secret_id     = aws_secretsmanager_secret.intervals_api_key.id
-  secret_string = var.intervals_api_key
-}
-
 # IAM policy for S3 access
 resource "aws_iam_role_policy" "lambda_s3_policy" {
   name = "${var.project_name}-s3-policy"
@@ -133,13 +126,13 @@ resource "aws_iam_role_policy" "lambda_secrets_policy" {
 
 # Lambda function
 resource "aws_lambda_function" "intervals_mapper" {
-  filename      = "target/lambda/${var.project_name}.zip"
+  filename      = "../target/lambda/${var.project_name}/bootstrap.zip"
   function_name = var.project_name
   role          = aws_iam_role.lambda_role.arn
   handler       = "bootstrap"
   runtime       = "provided.al2023"
-  timeout       = 300
-  memory_size   = 512
+  timeout       = 600
+  memory_size   = 2048
 
   environment {
     variables = {

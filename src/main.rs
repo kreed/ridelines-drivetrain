@@ -1,23 +1,71 @@
+use aws_lambda_events::event::eventbridge::EventBridgeEvent;
+use lambda_runtime::{Error, LambdaEvent, run, service_fn, tracing};
+
+use aws_config::BehaviorVersion;
+use aws_sdk_s3::Client as S3Client;
+use aws_sdk_secretsmanager::Client as SecretsManagerClient;
+use std::env;
+use std::path::PathBuf;
+
 mod convert;
 mod intervals_client;
 mod sync;
 
-#[cfg(not(feature = "lambda"))]
-mod cli;
+use crate::sync::sync_activities;
 
-#[cfg(feature = "lambda")]
-mod lambda_handler;
-
-#[cfg(not(feature = "lambda"))]
 #[tokio::main]
-async fn main() {
-    cli::cli_main().await;
+async fn main() -> Result<(), Error> {
+    tracing::init_default_subscriber();
+
+    run(service_fn(function_handler)).await
 }
 
-#[cfg(feature = "lambda")]
-#[tokio::main] 
-async fn main() -> Result<(), lambda_runtime::Error> {
-    use lambda_runtime::{run, service_fn};
-    let func = service_fn(lambda_handler::function_handler);
-    run(func).await
+/// This is the main body for the function.
+/// Write your code inside it.
+/// There are some code example in the following URLs:
+/// - https://github.com/awslabs/aws-lambda-rust-runtime/tree/main/examples
+/// - https://github.com/aws-samples/serverless-rust-demo/
+pub(crate) async fn function_handler(event: LambdaEvent<EventBridgeEvent>) -> Result<(), Error> {
+    // Extract some useful information from the request
+    let (payload, _context) = event.into_parts();
+    tracing::info!("Payload: {:?}", payload);
+
+    // Extract athlete_id from the event detail
+    // For now, we'll assume the athlete_id is passed in the detail field
+    let athlete_id = payload
+        .detail
+        .get("athlete_id")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| Error::from("athlete_id not found in event detail"))?;
+
+    // Get required environment variables
+    let secret_arn = env::var("SECRETS_MANAGER_SECRET_ARN")
+        .map_err(|_| Error::from("SECRETS_MANAGER_SECRET_ARN environment variable not set"))?;
+
+    let _s3_bucket =
+        env::var("S3_BUCKET").map_err(|_| Error::from("S3_BUCKET environment variable not set"))?;
+
+    // Initialize AWS SDK
+    let config = aws_config::load_defaults(BehaviorVersion::latest()).await;
+    let _s3_client = S3Client::new(&config);
+    let secrets_client = SecretsManagerClient::new(&config);
+
+    // Retrieve API key from Secrets Manager
+    let secret_value = secrets_client
+        .get_secret_value()
+        .secret_id(&secret_arn)
+        .send()
+        .await
+        .map_err(|e| Error::from(format!("Failed to retrieve secret: {e}")))?;
+
+    let api_key = secret_value
+        .secret_string()
+        .ok_or_else(|| Error::from("Secret string not found"))?;
+
+    // For now, use the existing sync_activities function with a temporary output directory
+    // This will need to be adapted to write to S3 instead of local filesystem
+    let temp_dir = PathBuf::from("/tmp");
+    sync_activities(api_key, athlete_id, &temp_dir).await;
+
+    Ok(())
 }

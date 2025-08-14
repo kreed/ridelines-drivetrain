@@ -20,8 +20,6 @@ pub struct LambdaResponse {
     pub files_processed: u32,
 }
 
-
-
 pub async fn function_handler(event: LambdaEvent<LambdaRequest>) -> Result<LambdaResponse, Error> {
     let (event, _context) = event.into_parts();
     

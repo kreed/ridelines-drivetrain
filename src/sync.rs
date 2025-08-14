@@ -133,7 +133,7 @@ pub async fn sync_activities(api_key: &str, athlete_id: &str, output_dir: &Path)
                         }
                     }
                 };
-                
+
                 // Download with retry logic handled by middleware
                 match client.download_fit(&activity.id).await {
                     Ok(fit_data) => {
