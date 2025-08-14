@@ -93,6 +93,8 @@ jobs:
   deploy:
     needs: [build, test, test-tofu]
     runs-on: ubuntu-latest
+    permissions:
+      id-token: write
     if: github.ref == 'refs/heads/main' && github.event_name == 'push'
     steps:
     - uses: actions/checkout@v5
