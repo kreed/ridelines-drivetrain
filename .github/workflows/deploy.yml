@@ -91,7 +91,7 @@ jobs:
       run: tofu validate
 
   deploy:
-    needs: build, test, test-tofu
+    needs: [build, test, test-tofu]
     runs-on: ubuntu-latest
     if: github.ref == 'refs/heads/main' && github.event_name == 'push'
     steps:
