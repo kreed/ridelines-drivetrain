@@ -5,7 +5,6 @@ use aws_config::BehaviorVersion;
 use aws_sdk_s3::Client as S3Client;
 use aws_sdk_secretsmanager::Client as SecretsManagerClient;
 use std::env;
-use std::path::PathBuf;
 
 mod convert;
 mod intervals_client;
@@ -42,12 +41,14 @@ pub(crate) async fn function_handler(event: LambdaEvent<EventBridgeEvent>) -> Re
     let secret_arn = env::var("SECRETS_MANAGER_SECRET_ARN")
         .map_err(|_| Error::from("SECRETS_MANAGER_SECRET_ARN environment variable not set"))?;
 
-    let _s3_bucket =
+    let s3_bucket =
         env::var("S3_BUCKET").map_err(|_| Error::from("S3_BUCKET environment variable not set"))?;
+    
+    let s3_prefix = env::var("S3_PREFIX").unwrap_or_else(|_| format!("athletes/{}", athlete_id));
 
     // Initialize AWS SDK
     let config = aws_config::load_defaults(BehaviorVersion::latest()).await;
-    let _s3_client = S3Client::new(&config);
+    let s3_client = S3Client::new(&config);
     let secrets_client = SecretsManagerClient::new(&config);
 
     // Retrieve API key from Secrets Manager
@@ -62,10 +63,8 @@ pub(crate) async fn function_handler(event: LambdaEvent<EventBridgeEvent>) -> Re
         .secret_string()
         .ok_or_else(|| Error::from("Secret string not found"))?;
 
-    // For now, use the existing sync_activities function with a temporary output directory
-    // This will need to be adapted to write to S3 instead of local filesystem
-    let temp_dir = PathBuf::from("/tmp");
-    sync_activities(api_key, athlete_id, &temp_dir).await;
+    // Sync activities directly to S3
+    sync_activities(api_key, athlete_id, &s3_client, &s3_bucket, &s3_prefix).await;
 
     Ok(())
 }

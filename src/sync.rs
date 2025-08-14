@@ -1,11 +1,10 @@
 use crate::convert::convert_fit_to_geojson;
 use crate::intervals_client::{Activity, DownloadError, IntervalsClient};
+use aws_sdk_s3::Client as S3Client;
+use aws_sdk_s3::primitives::ByteStream;
 use futures::stream::{self, StreamExt};
 use sanitize_filename::sanitize;
 use std::collections::HashSet;
-use std::fs;
-use std::io::Write;
-use std::path::Path;
 use std::sync::{Arc, Mutex};
 use tokio::sync::Semaphore;
 use tracing::{info, warn, error};
@@ -19,12 +18,8 @@ pub struct DownloadStats {
     pub deleted: usize,
 }
 
-pub async fn sync_activities(api_key: &str, athlete_id: &str, output_dir: &Path) {
-    // Create output directory if it doesn't exist
-    if let Err(e) = fs::create_dir_all(output_dir) {
-        error!("Error creating output directory: {e}");
-        return;
-    }
+pub async fn sync_activities(api_key: &str, athlete_id: &str, s3_client: &S3Client, s3_bucket: &str, s3_prefix: &str) {
+    info!("Starting sync to S3 bucket: {s3_bucket}, prefix: {s3_prefix}");
 
     // Create intervals client
     let client = IntervalsClient::new(api_key.to_string());
@@ -45,8 +40,14 @@ pub async fn sync_activities(api_key: &str, athlete_id: &str, output_dir: &Path)
 
     info!("Found {} activities for athlete {}", activities.len(), athlete_id);
 
-    // Get all existing activity files (all are potentially orphaned initially)
-    let orphaned_files = get_existing_activity_files(output_dir);
+    // Get all existing activity files in S3 (all are potentially orphaned initially)
+    let orphaned_files = match get_existing_activity_files_s3(s3_client, s3_bucket, s3_prefix).await {
+        Ok(files) => files,
+        Err(e) => {
+            warn!("Failed to get existing S3 files: {e}");
+            HashSet::new()
+        }
+    };
 
     info!("Starting sync of {} activities", activities.len());
 
@@ -61,7 +62,9 @@ pub async fn sync_activities(api_key: &str, athlete_id: &str, output_dir: &Path)
     // Limit concurrent downloads to avoid overwhelming the server
     let semaphore = Arc::new(Semaphore::new(5));
     let client = Arc::new(client);
-    let output_dir = Arc::new(output_dir.to_path_buf());
+    let s3_client = Arc::new(s3_client.clone());
+    let s3_bucket = Arc::new(s3_bucket.to_string());
+    let s3_prefix = Arc::new(s3_prefix.to_string());
     let orphaned_files = Arc::new(Mutex::new(orphaned_files));
 
     // Process activities in parallel
@@ -70,7 +73,9 @@ pub async fn sync_activities(api_key: &str, athlete_id: &str, output_dir: &Path)
             let semaphore = semaphore.clone();
             let stats = stats.clone();
             let client = client.clone();
-            let output_dir = output_dir.clone();
+            let s3_client = s3_client.clone();
+            let s3_bucket = s3_bucket.clone();
+            let s3_prefix = s3_prefix.clone();
             let orphaned_files = orphaned_files.clone();
 
             async move {
@@ -78,15 +83,15 @@ pub async fn sync_activities(api_key: &str, athlete_id: &str, output_dir: &Path)
                 
                 info!("Processing activity: {} (ID: {})", activity.name, activity.id);
                 
-                let expected_filename = generate_filename(&activity);
+                let expected_key = generate_key(&activity, athlete_id);
                 
                 // We'll remove from orphaned files after we know which file we created
                 
-                let geojson_path = output_dir.join(format!("{expected_filename}.geojson"));
-                let stub_path = output_dir.join(format!("{expected_filename}.stub"));
+                let geojson_key = format!("{}/{}.geojson", s3_prefix, expected_key);
+                let stub_key = format!("{}/{}.stub", s3_prefix, expected_key);
 
-                let geojson_exists = geojson_path.exists();
-                let stub_exists = stub_path.exists();
+                let geojson_exists = orphaned_files.lock().unwrap().contains(&geojson_key);
+                let stub_exists = orphaned_files.lock().unwrap().contains(&stub_key);
 
                 // Check for bad state (both files exist) - redownload
                 if geojson_exists && stub_exists {
@@ -97,28 +102,36 @@ pub async fn sync_activities(api_key: &str, athlete_id: &str, output_dir: &Path)
                         stats.skipped_unchanged += 1;
                     }
                     if let Ok(mut orphaned) = orphaned_files.lock() {
-                        orphaned.remove(&format!("{expected_filename}.geojson"));
-                        orphaned.remove(&format!("{expected_filename}.stub"));
+                        orphaned.remove(&geojson_key);
+                        orphaned.remove(&stub_key);
                     }
                     return;
                 }
 
                 // Neither file exists, download activity
                 
-                // Helper function to write empty stub file and update stats
-                let write_empty_file = || {
-                    match fs::write(&stub_path, "") {
+                // Helper function to write empty stub file to S3 and update stats
+                let write_empty_file = || async {
+                    let result = s3_client
+                        .put_object()
+                        .bucket(&*s3_bucket)
+                        .key(&stub_key)
+                        .body(ByteStream::from_static(b""))
+                        .send()
+                        .await;
+                    
+                    match result {
                         Ok(_) => {
                             if let Ok(mut stats) = stats.lock() {
-                                stats.downloaded_empty.insert(expected_filename.clone());
+                                stats.downloaded_empty.insert(expected_key.clone());
                             }
                             // Remove the stub file from orphaned files list
                             if let Ok(mut orphaned) = orphaned_files.lock() {
-                                orphaned.remove(&format!("{expected_filename}.stub"));
+                                orphaned.remove(&stub_key);
                             }
                         }
                         Err(e) => {
-                            error!("Failed to write stub file for activity {}: {}", activity.id, e);
+                            error!("Failed to write stub file to S3 for activity {}: {}", activity.id, e);
                             if let Ok(mut stats) = stats.lock() {
                                 stats.failed += 1;
                             }
@@ -132,19 +145,28 @@ pub async fn sync_activities(api_key: &str, athlete_id: &str, output_dir: &Path)
                         // Convert FIT to GeoJSON
                         match convert_fit_to_geojson(&fit_data, &activity).await {
                             Ok(Some(data)) => {
-                                // Write GeoJSON file with data
-                                match fs::write(&geojson_path, data) {
+                                // Write GeoJSON file to S3
+                                let result = s3_client
+                                    .put_object()
+                                    .bucket(&*s3_bucket)
+                                    .key(&geojson_key)
+                                    .body(ByteStream::from(data.into_bytes()))
+                                    .content_type("application/geo+json")
+                                    .send()
+                                    .await;
+                                
+                                match result {
                                     Ok(_) => {
                                         if let Ok(mut stats) = stats.lock() {
                                             stats.downloaded += 1;
                                         }
                                         // Remove the geojson file from orphaned files list
                                         if let Ok(mut orphaned) = orphaned_files.lock() {
-                                            orphaned.remove(&format!("{expected_filename}.geojson"));
+                                            orphaned.remove(&geojson_key);
                                         }
                                     }
                                     Err(e) => {
-                                        error!("Failed to write GeoJSON file for activity {}: {}", activity.id, e);
+                                        error!("Failed to write GeoJSON file to S3 for activity {}: {}", activity.id, e);
                                         if let Ok(mut stats) = stats.lock() {
                                             stats.failed += 1;
                                         }
@@ -153,7 +175,7 @@ pub async fn sync_activities(api_key: &str, athlete_id: &str, output_dir: &Path)
                             }
                             Ok(None) => {
                                 // No GPS data found in FIT file - write empty file
-                                write_empty_file();
+                                write_empty_file().await;
                             }
                             Err(e) => {
                                 error!("Failed to convert FIT to GeoJSON for activity {}: {}", activity.id, e);
@@ -165,7 +187,7 @@ pub async fn sync_activities(api_key: &str, athlete_id: &str, output_dir: &Path)
                     }
                     Err(DownloadError::Http(status)) if status.as_u16() == 422 => {
                         // HTTP 422 usually means no GPS data available - write empty file
-                        write_empty_file();
+                        write_empty_file().await;
                     }
                     Err(e) => {
                         error!("Failed to download activity {}: {}", activity.id, e);
@@ -182,15 +204,21 @@ pub async fn sync_activities(api_key: &str, athlete_id: &str, output_dir: &Path)
 
     info!("Activity processing complete");
 
-    // Delete all remaining orphaned files
+    // Delete all remaining orphaned files from S3
     let orphaned_files_to_delete = orphaned_files.lock().unwrap();
     let deleted_count = orphaned_files_to_delete.len();
-    for filename in orphaned_files_to_delete.iter() {
-        let file_path = output_dir.join(filename);
-        if let Err(e) = fs::remove_file(&file_path) {
-            warn!("Failed to delete orphaned file {filename}: {e}");
+    for s3_key in orphaned_files_to_delete.iter() {
+        let result = s3_client
+            .delete_object()
+            .bucket(&**s3_bucket)
+            .key(s3_key)
+            .send()
+            .await;
+            
+        if let Err(e) = result {
+            warn!("Failed to delete orphaned S3 object {s3_key}: {e}");
         } else {
-            info!("Deleted orphaned file: {filename}");
+            info!("Deleted orphaned S3 object: {s3_key}");
         }
     }
 
@@ -211,39 +239,28 @@ pub async fn sync_activities(api_key: &str, athlete_id: &str, output_dir: &Path)
     info!("  Deleted (obsolete): {}", final_stats.deleted);
     info!("  Errors: {}", final_stats.failed);
 
-    // Write empty filenames to log file
-    if !final_stats.downloaded_empty.is_empty() {
-        let log_path = output_dir.join("downloaded_empty.log");
-        match fs::File::create(&log_path) {
-            Ok(mut file) => {
-                for filename in &final_stats.downloaded_empty {
-                    writeln!(file, "{filename}").ok();
-                }
-            }
-            Err(e) => {
-                warn!("Failed to create downloaded_empty.log: {e}");
-            }
-        }
-    }
 }
 
-fn get_existing_activity_files(output_dir: &Path) -> HashSet<String> {
-    let mut files = HashSet::new();
+async fn get_existing_activity_files_s3(s3_client: &S3Client, bucket: &str, prefix: &str) -> Result<HashSet<String>, Box<dyn std::error::Error>> {
+    let files = s3_client
+        .list_objects_v2()
+        .bucket(bucket)
+        .prefix(prefix)
+        .into_paginator()
+        .send()
+        .try_collect()
+        .await?
+        .into_iter()
+        .flat_map(|output| output.contents.unwrap_or_default())
+        .filter_map(|object| object.key)
+        .filter(|key| key.ends_with(".geojson") || key.ends_with(".stub"))
+        .collect();
 
-    if let Ok(entries) = fs::read_dir(output_dir) {
-        for entry in entries.flatten() {
-            if let Some(filename) = entry.file_name().to_str()
-                && (filename.ends_with(".geojson") || filename.ends_with(".stub"))
-            {
-                files.insert(filename.to_string());
-            }
-        }
-    }
-
-    files
+    Ok(files)
 }
 
-fn generate_filename(activity: &Activity) -> String {
+
+fn generate_key(activity: &Activity, athlete_id: &str) -> String {
     let date = parse_iso_date(&activity.start_date_local);
     let sanitized_name = sanitize(&activity.name);
     let sanitized_type = sanitize(&activity.activity_type);
@@ -251,8 +268,8 @@ fn generate_filename(activity: &Activity) -> String {
     let elapsed_time_str = format_elapsed_time(activity.elapsed_time);
 
     format!(
-        "{}-{}-{}-{}-{}-{}",
-        date, sanitized_name, sanitized_type, distance_str, elapsed_time_str, activity.id
+        "{}/{}-{}-{}-{}-{}-{}",
+        athlete_id, date, sanitized_name, sanitized_type, distance_str, elapsed_time_str, activity.id
     )
 }
 
