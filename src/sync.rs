@@ -63,6 +63,7 @@ impl SyncJob {
         let orphaned_files = self.get_existing_files().await?;
         self.process_activities_batch(activities, orphaned_files.clone()).await;
         self.cleanup_orphaned_files(orphaned_files).await;
+        self.concatenate_geojson_files().await;
         self.report_results();
         
         Ok(())
@@ -79,6 +80,18 @@ impl SyncJob {
     }
 
     async fn get_existing_files(&self) -> Result<Arc<Mutex<HashSet<String>>>, Box<dyn std::error::Error>> {
+        let files = self.list_activity_files(&[".geojson", ".stub"]).await
+            .unwrap_or_else(|e| {
+                warn!("Failed to get existing S3 files: {e}");
+                Vec::new()
+            })
+            .into_iter()
+            .collect();
+        
+        Ok(Arc::new(Mutex::new(files)))
+    }
+
+    async fn list_activity_files(&self, extensions: &[&str]) -> Result<Vec<String>, Box<dyn std::error::Error>> {
         let files = self.s3_client
             .list_objects_v2()
             .bucket(&self.s3_bucket)
@@ -86,21 +99,14 @@ impl SyncJob {
             .into_paginator()
             .send()
             .try_collect()
-            .await
-            .map(|results| {
-                results
-                    .into_iter()
-                    .flat_map(|output| output.contents.unwrap_or_default())
-                    .filter_map(|object| object.key)
-                    .filter(|key| key.ends_with(".geojson") || key.ends_with(".stub"))
-                    .collect()
-            })
-            .unwrap_or_else(|e| {
-                warn!("Failed to get existing S3 files: {e}");
-                HashSet::new()
-            });
+            .await?
+            .into_iter()
+            .flat_map(|output| output.contents.unwrap_or_default())
+            .filter_map(|object| object.key)
+            .filter(|key| extensions.iter().any(|ext| key.ends_with(ext)))
+            .collect();
         
-        Ok(Arc::new(Mutex::new(files)))
+        Ok(files)
     }
 
     async fn process_activities_batch(&self, activities: Vec<Activity>, orphaned_files: Arc<Mutex<HashSet<String>>>) {
@@ -272,6 +278,85 @@ impl SyncJob {
         if let Ok(mut stats) = self.stats.lock() {
             stats.deleted = deleted_count;
         }
+    }
+
+    async fn concatenate_geojson_files(&self) {
+        info!("Starting GeoJSON file concatenation");
+        
+        // Get all .geojson files
+        let geojson_files = match self.list_activity_files(&[".geojson"]).await {
+            Ok(files) => files,
+            Err(e) => {
+                error!("Failed to list GeoJSON files for concatenation: {}", e);
+                return;
+            }
+        };
+        
+        if geojson_files.is_empty() {
+            info!("No GeoJSON files found to concatenate");
+            return;
+        }
+        
+        info!("Found {} GeoJSON files to concatenate", geojson_files.len());
+        
+        // Concatenate all file contents
+        let mut concatenated_content = String::new();
+        let mut successful_files = 0;
+        
+        for file_key in &geojson_files {
+            match self.get_file_content(file_key).await {
+                Ok(content) => {
+                    concatenated_content.push_str(&content);
+                    concatenated_content.push('\n'); // Add newline between files
+                    successful_files += 1;
+                }
+                Err(e) => {
+                    warn!("Failed to read file {} for concatenation: {}", file_key, e);
+                }
+            }
+        }
+        
+        if successful_files == 0 {
+            warn!("No files could be read for concatenation");
+            return;
+        }
+        
+        // Write concatenated file to S3
+        let concatenated_key = format!("athletes/{}/all-activities.dat", self.athlete_id);
+        match self.write_concatenated_file(&concatenated_key, concatenated_content).await {
+            Ok(_) => {
+                info!("Successfully created concatenated file with {} activities", successful_files);
+            }
+            Err(e) => {
+                error!("Failed to write concatenated file: {}", e);
+            }
+        }
+    }
+
+    async fn get_file_content(&self, key: &str) -> Result<String, Box<dyn std::error::Error>> {
+        let response = self.s3_client
+            .get_object()
+            .bucket(&self.s3_bucket)
+            .key(key)
+            .send()
+            .await?;
+            
+        let body = response.body.collect().await?;
+        let content = String::from_utf8(body.to_vec())?;
+        Ok(content)
+    }
+
+    async fn write_concatenated_file(&self, key: &str, content: String) -> Result<(), Box<dyn std::error::Error>> {
+        self.s3_client
+            .put_object()
+            .bucket(&self.s3_bucket)
+            .key(key)
+            .body(ByteStream::from(content.into_bytes()))
+            .content_type("text/plain")
+            .send()
+            .await?;
+            
+        Ok(())
     }
 
     fn report_results(&self) {
