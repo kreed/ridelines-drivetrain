@@ -126,13 +126,14 @@ resource "aws_iam_role_policy" "lambda_secrets_policy" {
 
 # Lambda function
 resource "aws_lambda_function" "intervals_mapper" {
-  filename      = "../target/lambda/${var.project_name}/bootstrap.zip"
-  function_name = var.project_name
-  role          = aws_iam_role.lambda_role.arn
-  handler       = "bootstrap"
-  runtime       = "provided.al2023"
-  timeout       = 600
-  memory_size   = 2048
+  filename         = "../target/lambda/${var.project_name}/bootstrap.zip"
+  function_name    = var.project_name
+  role             = aws_iam_role.lambda_role.arn
+  handler          = "bootstrap"
+  runtime          = "provided.al2023"
+  timeout          = 600
+  memory_size      = 2048
+  source_code_hash = filebase64sha256("../target/lambda/${var.project_name}/bootstrap.zip")
 
   environment {
     variables = {
