@@ -15,11 +15,11 @@ jobs:
   test:
     runs-on: ubuntu-latest
     steps:
-    - uses: actions/checkout@v4
-    
+    - uses: actions/checkout@v5
+
     - name: Install Rust
       uses: dtolnay/rust-toolchain@stable
-      
+
     - name: Cache Cargo dependencies
       uses: actions/cache@v4
       with:
@@ -28,7 +28,7 @@ jobs:
           ~/.cargo/git
           target
         key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
-        
+
     - name: Run tests
       run: cargo test
       
@@ -38,7 +38,7 @@ jobs:
   build:
     runs-on: ubuntu-latest
     steps:
-    - uses: actions/checkout@v4
+    - uses: actions/checkout@v5
 
     - name: Install Rust toolchain with Cargo Lambda
       uses: moonrepo/setup-rust@v1
@@ -68,12 +68,34 @@ jobs:
         name: lambda-deployment-package
         path: target/lambda/intervals-mapper/bootstrap.zip
 
+  test-tofu:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v5
+    
+    - name: Setup OpenTofu
+      uses: opentofu/setup-opentofu@v1
+      with:
+        tofu_version: "1.8.0"
+        
+    - name: OpenTofu Format Check
+      working-directory: terraform
+      run: tofu fmt -check
+      
+    - name: OpenTofu Init
+      working-directory: terraform
+      run: tofu init -backend=false
+      
+    - name: OpenTofu Validate
+      working-directory: terraform
+      run: tofu validate
+
   deploy:
-    needs: build
+    needs: build, test, test-tofu
     runs-on: ubuntu-latest
     if: github.ref == 'refs/heads/main' && github.event_name == 'push'
     steps:
-    - uses: actions/checkout@v4
+    - uses: actions/checkout@v5
     
     - name: Download build artifacts
       uses: actions/download-artifact@v4
@@ -104,24 +126,3 @@ jobs:
       working-directory: terraform
       run: tofu apply -auto-approve
 
-  validate-opentofu:
-    runs-on: ubuntu-latest
-    steps:
-    - uses: actions/checkout@v4
-    
-    - name: Setup OpenTofu
-      uses: opentofu/setup-opentofu@v1
-      with:
-        tofu_version: "1.8.0"
-        
-    - name: OpenTofu Format Check
-      working-directory: terraform
-      run: tofu fmt -check
-      
-    - name: OpenTofu Init
-      working-directory: terraform
-      run: tofu init -backend=false
-      
-    - name: OpenTofu Validate
-      working-directory: terraform
-      run: tofu validate
