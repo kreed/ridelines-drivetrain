@@ -145,7 +145,7 @@ resource "aws_lambda_function" "intervals_mapper" {
   function_name    = var.project_name
   role             = aws_iam_role.lambda_role.arn
   handler          = "bootstrap"
-  runtime          = "python3.13"
+  runtime          = "provided.al2023"
   timeout          = 600
   memory_size      = 2048
   source_code_hash = filebase64sha256("../target/lambda/${var.project_name}/bootstrap.zip")

@@ -25,6 +25,7 @@ lambda_runtime = "0.14.3"
 aws-sdk-s3 = { version = "1.0" }
 aws-sdk-secretsmanager = { version = "1.0" }
 aws-config = { version = "1.0" }
+rusqlite = { version = "0.30", features = ["bundled"] }
 
 [profile.release]
 lto = true
