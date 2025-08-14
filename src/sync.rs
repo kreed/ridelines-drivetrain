@@ -13,13 +13,13 @@ use tracing::{info, warn, error};
 pub struct DownloadStats {
     pub downloaded: usize,
     pub skipped_unchanged: usize,
-    pub downloaded_empty: HashSet<String>,
+    pub downloaded_empty: usize,
     pub failed: usize,
     pub deleted: usize,
 }
 
-pub async fn sync_activities(api_key: &str, athlete_id: &str, s3_client: &S3Client, s3_bucket: &str, s3_prefix: &str) {
-    info!("Starting sync to S3 bucket: {s3_bucket}, prefix: {s3_prefix}");
+pub async fn sync_activities(api_key: &str, athlete_id: &str, s3_client: &S3Client, s3_bucket: &str) {
+    info!("Starting sync to S3 bucket: {s3_bucket}, athlete: {athlete_id}");
 
     // Create intervals client
     let client = IntervalsClient::new(api_key.to_string());
@@ -41,7 +41,8 @@ pub async fn sync_activities(api_key: &str, athlete_id: &str, s3_client: &S3Clie
     info!("Found {} activities for athlete {}", activities.len(), athlete_id);
 
     // Get all existing activity files in S3 (all are potentially orphaned initially)
-    let orphaned_files = match get_existing_activity_files_s3(s3_client, s3_bucket, s3_prefix).await {
+    let s3_prefix = format!("athletes/{athlete_id}");
+    let orphaned_files = match get_existing_activity_files_s3(s3_client, s3_bucket, &s3_prefix).await {
         Ok(files) => files,
         Err(e) => {
             warn!("Failed to get existing S3 files: {e}");
@@ -54,7 +55,7 @@ pub async fn sync_activities(api_key: &str, athlete_id: &str, s3_client: &S3Clie
     let stats = Arc::new(Mutex::new(DownloadStats {
         downloaded: 0,
         skipped_unchanged: 0,
-        downloaded_empty: HashSet::new(),
+        downloaded_empty: 0,
         failed: 0,
         deleted: 0,
     }));
@@ -64,7 +65,6 @@ pub async fn sync_activities(api_key: &str, athlete_id: &str, s3_client: &S3Clie
     let client = Arc::new(client);
     let s3_client = Arc::new(s3_client.clone());
     let s3_bucket = Arc::new(s3_bucket.to_string());
-    let s3_prefix = Arc::new(s3_prefix.to_string());
     let orphaned_files = Arc::new(Mutex::new(orphaned_files));
 
     // Process activities in parallel
@@ -75,20 +75,16 @@ pub async fn sync_activities(api_key: &str, athlete_id: &str, s3_client: &S3Clie
             let client = client.clone();
             let s3_client = s3_client.clone();
             let s3_bucket = s3_bucket.clone();
-            let s3_prefix = s3_prefix.clone();
             let orphaned_files = orphaned_files.clone();
+            let athlete_id = athlete_id.to_string();
 
             async move {
                 let _permit = semaphore.acquire().await.unwrap();
                 
                 info!("Processing activity: {} (ID: {})", activity.name, activity.id);
                 
-                let expected_key = generate_key(&activity, athlete_id);
-                
-                // We'll remove from orphaned files after we know which file we created
-                
-                let geojson_key = format!("{}/{}.geojson", s3_prefix, expected_key);
-                let stub_key = format!("{}/{}.stub", s3_prefix, expected_key);
+                let geojson_key = generate_key(&activity, &athlete_id, "geojson");
+                let stub_key = generate_key(&activity, &athlete_id, "stub");
 
                 let geojson_exists = orphaned_files.lock().unwrap().contains(&geojson_key);
                 let stub_exists = orphaned_files.lock().unwrap().contains(&stub_key);
@@ -123,7 +119,7 @@ pub async fn sync_activities(api_key: &str, athlete_id: &str, s3_client: &S3Clie
                     match result {
                         Ok(_) => {
                             if let Ok(mut stats) = stats.lock() {
-                                stats.downloaded_empty.insert(expected_key.clone());
+                                stats.downloaded_empty += 1;
                             }
                             // Remove the stub file from orphaned files list
                             if let Ok(mut orphaned) = orphaned_files.lock() {
@@ -205,9 +201,12 @@ pub async fn sync_activities(api_key: &str, athlete_id: &str, s3_client: &S3Clie
     info!("Activity processing complete");
 
     // Delete all remaining orphaned files from S3
-    let orphaned_files_to_delete = orphaned_files.lock().unwrap();
+    let orphaned_files_to_delete: Vec<String> = {
+        let guard = orphaned_files.lock().unwrap();
+        guard.iter().cloned().collect()
+    };
     let deleted_count = orphaned_files_to_delete.len();
-    for s3_key in orphaned_files_to_delete.iter() {
+    for s3_key in &orphaned_files_to_delete {
         let result = s3_client
             .delete_object()
             .bucket(&**s3_bucket)
@@ -232,10 +231,7 @@ pub async fn sync_activities(api_key: &str, athlete_id: &str, s3_client: &S3Clie
     info!("Sync summary:");
     info!("  Downloaded: {}", final_stats.downloaded);
     info!("  Skipped (unchanged): {}", final_stats.skipped_unchanged);
-    info!(
-        "  Downloaded (empty/no GPS): {}",
-        final_stats.downloaded_empty.len()
-    );
+    info!("  Downloaded (empty/no GPS): {}", final_stats.downloaded_empty);
     info!("  Deleted (obsolete): {}", final_stats.deleted);
     info!("  Errors: {}", final_stats.failed);
 
@@ -260,7 +256,7 @@ async fn get_existing_activity_files_s3(s3_client: &S3Client, bucket: &str, pref
 }
 
 
-fn generate_key(activity: &Activity, athlete_id: &str) -> String {
+fn generate_key(activity: &Activity, athlete_id: &str, extension: &str) -> String {
     let date = parse_iso_date(&activity.start_date_local);
     let sanitized_name = sanitize(&activity.name);
     let sanitized_type = sanitize(&activity.activity_type);
@@ -268,8 +264,8 @@ fn generate_key(activity: &Activity, athlete_id: &str) -> String {
     let elapsed_time_str = format_elapsed_time(activity.elapsed_time);
 
     format!(
-        "{}/{}-{}-{}-{}-{}-{}",
-        athlete_id, date, sanitized_name, sanitized_type, distance_str, elapsed_time_str, activity.id
+        "athletes/{athlete_id}/{date}-{sanitized_name}-{sanitized_type}-{distance_str}-{elapsed_time_str}-{}.{extension}",
+        activity.id
     )
 }
 

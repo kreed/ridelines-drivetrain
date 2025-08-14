@@ -44,8 +44,6 @@ pub(crate) async fn function_handler(event: LambdaEvent<EventBridgeEvent>) -> Re
     let s3_bucket =
         env::var("S3_BUCKET").map_err(|_| Error::from("S3_BUCKET environment variable not set"))?;
     
-    let s3_prefix = env::var("S3_PREFIX").unwrap_or_else(|_| format!("athletes/{}", athlete_id));
-
     // Initialize AWS SDK
     let config = aws_config::load_defaults(BehaviorVersion::latest()).await;
     let s3_client = S3Client::new(&config);
@@ -64,7 +62,7 @@ pub(crate) async fn function_handler(event: LambdaEvent<EventBridgeEvent>) -> Re
         .ok_or_else(|| Error::from("Secret string not found"))?;
 
     // Sync activities directly to S3
-    sync_activities(api_key, athlete_id, &s3_client, &s3_bucket, &s3_prefix).await;
+    sync_activities(api_key, athlete_id, &s3_client, &s3_bucket).await;
 
     Ok(())
 }
