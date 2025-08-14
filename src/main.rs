@@ -10,7 +10,7 @@ mod convert;
 mod intervals_client;
 mod sync;
 
-use crate::sync::sync_activities;
+use crate::sync::SyncJob;
 
 #[tokio::main]
 async fn main() -> Result<(), Error> {
@@ -62,7 +62,11 @@ pub(crate) async fn function_handler(event: LambdaEvent<EventBridgeEvent>) -> Re
         .ok_or_else(|| Error::from("Secret string not found"))?;
 
     // Sync activities directly to S3
-    sync_activities(api_key, athlete_id, &s3_client, &s3_bucket).await;
+    let sync_job = SyncJob::new(api_key, athlete_id, s3_client, &s3_bucket);
+    
+    if let Err(e) = sync_job.sync_activities().await {
+        return Err(Error::from(format!("Sync failed: {e}")));
+    }
 
     Ok(())
 }

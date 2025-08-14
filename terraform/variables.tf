@@ -10,12 +10,6 @@ variable "project_name" {
   default     = "intervals-mapper"
 }
 
-variable "intervals_api_key" {
-  description = "API key for intervals.icu"
-  type        = string
-  sensitive   = true
-}
-
 variable "enable_function_url" {
   description = "Enable Lambda function URL for HTTP access"
   type        = bool
