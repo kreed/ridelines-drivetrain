@@ -103,6 +103,16 @@ resource "aws_iam_role_policy" "lambda_s3_policy" {
           aws_s3_bucket.geojson_storage.arn,
           "${aws_s3_bucket.geojson_storage.arn}/*"
         ]
+      },
+      {
+        Effect = "Allow"
+        Action = [
+          "s3:PutObject",
+          "s3:PutObjectAcl"
+        ]
+        Resource = [
+          "arn:aws:s3:::kreed.org-website/*"
+        ]
       }
     ]
   })
@@ -135,7 +145,7 @@ resource "aws_lambda_function" "intervals_mapper" {
   function_name    = var.project_name
   role             = aws_iam_role.lambda_role.arn
   handler          = "bootstrap"
-  runtime          = "provided.al2023"
+  runtime          = "python3.13"
   timeout          = 600
   memory_size      = 2048
   source_code_hash = filebase64sha256("../target/lambda/${var.project_name}/bootstrap.zip")

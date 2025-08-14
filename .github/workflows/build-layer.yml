@@ -36,7 +36,7 @@ jobs:
         
         # Build tippecanoe in Docker container compatible with Lambda runtime
         cat > Dockerfile.layer << 'EOF'
-        FROM public.ecr.aws/lambda/provided:al2023
+        FROM public.ecr.aws/lambda/python:3.13
         
         # Install build dependencies
         RUN dnf update -y && \
@@ -50,11 +50,16 @@ jobs:
         RUN git checkout ${TIPPECANOE_VERSION}
         RUN make
         
-        # Copy binaries and dependencies
-        RUN mkdir -p /layer/bin /layer/lib
+        # Create layer directory structure
+        RUN mkdir -p /layer/bin /layer/lib /layer/python
+        
+        # Copy tippecanoe binaries and dependencies
         RUN cp tippecanoe tile-join /layer/bin/
         RUN ldd /layer/bin/tippecanoe | grep "=> /" | awk '{print $3}' | xargs -I '{}' cp '{}' /layer/lib/ || true
         RUN ldd /layer/bin/tile-join | grep "=> /" | awk '{print $3}' | xargs -I '{}' cp '{}' /layer/lib/ || true
+        
+        # Install mbutil via pip to layer python directory
+        RUN pip install --target /layer/python mbutil
         
         # Make binaries executable
         RUN chmod +x /layer/bin/*
@@ -87,8 +92,8 @@ jobs:
         LAYER_VERSION=$(aws lambda publish-layer-version \
           --layer-name "$LAYER_NAME" \
           --zip-file fileb://tippecanoe-layer.zip \
-          --description "Tippecanoe binaries for vector tile generation (built from ${{ github.event.inputs.tippecanoe_version || 'main' }})" \
-          --compatible-runtimes provided.al2023 \
+          --description "Tippecanoe binaries and mbutil for vector tile generation (built from ${{ github.event.inputs.tippecanoe_version || 'main' }})" \
+          --compatible-runtimes provided.al2023 python3.13 \
           --query 'Version' \
           --output text)
         

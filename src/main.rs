@@ -6,11 +6,15 @@ use aws_sdk_s3::Client as S3Client;
 use aws_sdk_secretsmanager::Client as SecretsManagerClient;
 use std::env;
 
+mod activity_sync;
 mod convert;
 mod intervals_client;
-mod sync;
+mod tile_generator;
+mod tile_uploader;
 
-use crate::sync::SyncJob;
+use crate::activity_sync::SyncJob;
+use crate::tile_generator::TileGenerator;
+use crate::tile_uploader::TileUploader;
 
 #[tokio::main]
 async fn main() -> Result<(), Error> {
@@ -62,10 +66,33 @@ pub(crate) async fn function_handler(event: LambdaEvent<EventBridgeEvent>) -> Re
         .ok_or_else(|| Error::from("Secret string not found"))?;
 
     // Sync activities directly to S3
-    let sync_job = SyncJob::new(api_key, athlete_id, s3_client, &s3_bucket);
+    let sync_job = SyncJob::new(api_key, athlete_id, s3_client.clone(), &s3_bucket);
     
     if let Err(e) = sync_job.sync_activities().await {
         return Err(Error::from(format!("Sync failed: {e}")));
+    }
+
+    // Generate MBTiles from synced GeoJSON files
+    let tile_generator = TileGenerator::new(s3_client.clone(), s3_bucket.clone(), athlete_id.to_string());
+    
+    match tile_generator.generate_mbtiles().await {
+        Ok(mbtiles_file) => {
+            // Extract and upload individual tiles to kreed.org-website
+            let tile_uploader = TileUploader::new(s3_client, athlete_id.to_string());
+            let temp_tiles_dir = format!("/tmp/{athlete_id}_tiles");
+            
+            if let Err(e) = tile_uploader.extract_and_upload_tiles(&mbtiles_file, &temp_tiles_dir).await {
+                tracing::error!("Failed to extract and upload tiles: {}", e);
+                return Err(Error::from(format!("Tile upload failed: {e}")));
+            }
+            
+            // Clean up temp mbtiles file
+            let _ = tokio::fs::remove_file(&mbtiles_file).await;
+        }
+        Err(e) => {
+            tracing::error!("Failed to generate MBTiles: {}", e);
+            return Err(Error::from(format!("MBTiles generation failed: {e}")));
+        }
     }
 
     Ok(())
