@@ -1,7 +1,6 @@
 use crate::convert::convert_fit_to_geojson;
 use crate::intervals_client::{Activity, DownloadError, IntervalsClient};
 use futures::stream::{self, StreamExt};
-use indicatif::{ProgressBar, ProgressStyle};
 use sanitize_filename::sanitize;
 use std::collections::HashSet;
 use std::fs;
@@ -9,6 +8,7 @@ use std::io::Write;
 use std::path::Path;
 use std::sync::{Arc, Mutex};
 use tokio::sync::Semaphore;
+use tracing::{info, warn, error};
 
 #[derive(Debug)]
 pub struct DownloadStats {
@@ -22,7 +22,7 @@ pub struct DownloadStats {
 pub async fn sync_activities(api_key: &str, athlete_id: &str, output_dir: &Path) {
     // Create output directory if it doesn't exist
     if let Err(e) = fs::create_dir_all(output_dir) {
-        eprintln!("Error creating output directory: {e}");
+        error!("Error creating output directory: {e}");
         return;
     }
 
@@ -33,27 +33,22 @@ pub async fn sync_activities(api_key: &str, athlete_id: &str, output_dir: &Path)
     let activities = match client.fetch_activities(athlete_id).await {
         Ok(activities) => activities,
         Err(e) => {
-            eprintln!("Error fetching activities: {e}");
+            error!("Error fetching activities: {e}");
             return;
         }
     };
 
     if activities.is_empty() {
-        println!("No activities found for athlete {athlete_id}");
+        info!("No activities found for athlete {athlete_id}");
         return;
     }
+
+    info!("Found {} activities for athlete {}", activities.len(), athlete_id);
 
     // Get all existing activity files (all are potentially orphaned initially)
     let orphaned_files = get_existing_activity_files(output_dir);
 
-    // Set up progress bar
-    let pb = ProgressBar::new(activities.len() as u64);
-    pb.set_style(
-        ProgressStyle::default_bar()
-            .template("{spinner:.green} [{elapsed_precise}] [{bar:40.cyan/blue}] {pos}/{len} {msg}")
-            .unwrap()
-            .progress_chars("#>-"),
-    );
+    info!("Starting sync of {} activities", activities.len());
 
     let stats = Arc::new(Mutex::new(DownloadStats {
         downloaded: 0,
@@ -65,7 +60,6 @@ pub async fn sync_activities(api_key: &str, athlete_id: &str, output_dir: &Path)
 
     // Limit concurrent downloads to avoid overwhelming the server
     let semaphore = Arc::new(Semaphore::new(5));
-    let pb = Arc::new(pb);
     let client = Arc::new(client);
     let output_dir = Arc::new(output_dir.to_path_buf());
     let orphaned_files = Arc::new(Mutex::new(orphaned_files));
@@ -74,7 +68,6 @@ pub async fn sync_activities(api_key: &str, athlete_id: &str, output_dir: &Path)
     stream::iter(activities)
         .map(|activity| {
             let semaphore = semaphore.clone();
-            let pb = pb.clone();
             let stats = stats.clone();
             let client = client.clone();
             let output_dir = output_dir.clone();
@@ -83,7 +76,7 @@ pub async fn sync_activities(api_key: &str, athlete_id: &str, output_dir: &Path)
             async move {
                 let _permit = semaphore.acquire().await.unwrap();
                 
-                pb.set_message(format!("Processing {}", activity.name));
+                info!("Processing activity: {} (ID: {})", activity.name, activity.id);
                 
                 let expected_filename = generate_filename(&activity);
                 
@@ -97,7 +90,7 @@ pub async fn sync_activities(api_key: &str, athlete_id: &str, output_dir: &Path)
 
                 // Check for bad state (both files exist) - redownload
                 if geojson_exists && stub_exists {
-                    eprintln!("Warning: Both .geojson and .stub files exist for activity {}, redownloading", activity.id);
+                    warn!("Both .geojson and .stub files exist for activity {}, redownloading", activity.id);
                 } else if geojson_exists || stub_exists {
                     // One file exists, skip and remove both types from orphaned files
                     if let Ok(mut stats) = stats.lock() {
@@ -107,7 +100,6 @@ pub async fn sync_activities(api_key: &str, athlete_id: &str, output_dir: &Path)
                         orphaned.remove(&format!("{expected_filename}.geojson"));
                         orphaned.remove(&format!("{expected_filename}.stub"));
                     }
-                    pb.inc(1);
                     return;
                 }
 
@@ -126,7 +118,7 @@ pub async fn sync_activities(api_key: &str, athlete_id: &str, output_dir: &Path)
                             }
                         }
                         Err(e) => {
-                            eprintln!("Failed to write stub file for activity {}: {}", activity.id, e);
+                            error!("Failed to write stub file for activity {}: {}", activity.id, e);
                             if let Ok(mut stats) = stats.lock() {
                                 stats.failed += 1;
                             }
@@ -152,7 +144,7 @@ pub async fn sync_activities(api_key: &str, athlete_id: &str, output_dir: &Path)
                                         }
                                     }
                                     Err(e) => {
-                                        eprintln!("Failed to write GeoJSON file for activity {}: {}", activity.id, e);
+                                        error!("Failed to write GeoJSON file for activity {}: {}", activity.id, e);
                                         if let Ok(mut stats) = stats.lock() {
                                             stats.failed += 1;
                                         }
@@ -164,7 +156,7 @@ pub async fn sync_activities(api_key: &str, athlete_id: &str, output_dir: &Path)
                                 write_empty_file();
                             }
                             Err(e) => {
-                                eprintln!("Failed to convert FIT to GeoJSON for activity {}: {}", activity.id, e);
+                                error!("Failed to convert FIT to GeoJSON for activity {}: {}", activity.id, e);
                                 if let Ok(mut stats) = stats.lock() {
                                     stats.failed += 1;
                                 }
@@ -176,21 +168,19 @@ pub async fn sync_activities(api_key: &str, athlete_id: &str, output_dir: &Path)
                         write_empty_file();
                     }
                     Err(e) => {
-                        eprintln!("Failed to download activity {}: {}", activity.id, e);
+                        error!("Failed to download activity {}: {}", activity.id, e);
                         if let Ok(mut stats) = stats.lock() {
                             stats.failed += 1;
                         }
                     }
                 }
-
-                pb.inc(1);
             }
         })
         .buffer_unordered(5)
         .collect::<Vec<_>>()
         .await;
 
-    pb.finish_with_message("Sync complete!");
+    info!("Activity processing complete");
 
     // Delete all remaining orphaned files
     let orphaned_files_to_delete = orphaned_files.lock().unwrap();
@@ -198,7 +188,9 @@ pub async fn sync_activities(api_key: &str, athlete_id: &str, output_dir: &Path)
     for filename in orphaned_files_to_delete.iter() {
         let file_path = output_dir.join(filename);
         if let Err(e) = fs::remove_file(&file_path) {
-            eprintln!("Warning: Failed to delete orphaned file {filename}: {e}");
+            warn!("Failed to delete orphaned file {filename}: {e}");
+        } else {
+            info!("Deleted orphaned file: {filename}");
         }
     }
 
@@ -209,15 +201,15 @@ pub async fn sync_activities(api_key: &str, athlete_id: &str, output_dir: &Path)
 
     // Extract final stats
     let final_stats = stats.lock().unwrap();
-    println!("Sync summary:");
-    println!("  Downloaded: {}", final_stats.downloaded);
-    println!("  Skipped (unchanged): {}", final_stats.skipped_unchanged);
-    println!(
+    info!("Sync summary:");
+    info!("  Downloaded: {}", final_stats.downloaded);
+    info!("  Skipped (unchanged): {}", final_stats.skipped_unchanged);
+    info!(
         "  Downloaded (empty/no GPS): {}",
         final_stats.downloaded_empty.len()
     );
-    println!("  Deleted (obsolete): {}", final_stats.deleted);
-    println!("  Errors: {}", final_stats.failed);
+    info!("  Deleted (obsolete): {}", final_stats.deleted);
+    info!("  Errors: {}", final_stats.failed);
 
     // Write empty filenames to log file
     if !final_stats.downloaded_empty.is_empty() {
@@ -229,7 +221,7 @@ pub async fn sync_activities(api_key: &str, athlete_id: &str, output_dir: &Path)
                 }
             }
             Err(e) => {
-                eprintln!("Warning: Failed to create downloaded_empty.log: {e}");
+                warn!("Failed to create downloaded_empty.log: {e}");
             }
         }
     }
