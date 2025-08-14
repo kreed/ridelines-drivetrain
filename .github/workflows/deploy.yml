@@ -61,7 +61,10 @@ jobs:
       
     - name: Build Lambda function
       run: cargo lambda build --release
-      
+ 
+    - name: List files
+      run: ls -lh target/lambda/intervals-mapper
+ 
     - name: Upload build artifacts
       uses: actions/upload-artifact@v4
       with:
@@ -105,7 +108,10 @@ jobs:
       with:
         name: lambda-deployment-package
         path: target/lambda/
-        
+  
+    - name: List files
+      run: find target/lambda
+       
     - name: Configure AWS credentials
       uses: aws-actions/configure-aws-credentials@v4
       with:
