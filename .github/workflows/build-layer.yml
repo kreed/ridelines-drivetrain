@@ -39,8 +39,8 @@ jobs:
         FROM public.ecr.aws/lambda/provided:al2023
         
         # Install build dependencies
-        RUN yum update -y && \
-            yum install -y gcc-c++ make sqlite-devel zlib-devel git
+        RUN dnf update -y && \
+            dnf install -y gcc-c++ make sqlite-devel zlib-devel git
         
         # Clone and build tippecanoe
         WORKDIR /build
