@@ -20,7 +20,7 @@ geojson = "0.24"
 geo-types = "0.7"
 geo = "0.30.0"
 fitparser = "0.10.0"
-aws_lambda_events = { version = "0.15.1", default-features = false, features = ["eventbridge"] }
+aws_lambda_events = { version = "0.17.0", default-features = false, features = ["eventbridge"] }
 lambda_runtime = "0.13.0"
 aws-sdk-s3 = { version = "1.0" }
 aws-sdk-secretsmanager = { version = "1.0" }
