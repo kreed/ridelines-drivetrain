@@ -1,4 +1,4 @@
-name: Deploy to AWS Lambda
+name: Build Lambda
 
 on:
   push:
@@ -12,7 +12,7 @@ env:
   CARGO_TERM_COLOR: always
 
 jobs:
-  test:
+  test-rust:
     runs-on: ubuntu-latest
     steps:
     - uses: actions/checkout@v5
@@ -94,7 +94,7 @@ jobs:
       run: tofu validate
 
   deploy:
-    needs: [build, test, test-tofu]
+    needs: [build, test-rust, test-tofu]
     runs-on: ubuntu-latest
     permissions:
       contents: read

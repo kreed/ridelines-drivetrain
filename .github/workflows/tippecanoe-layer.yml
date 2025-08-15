@@ -1,4 +1,4 @@
-name: Build Tippecanoe Lambda Layer
+name: Build Tippecanoe Layer
 
 on:
   push:
