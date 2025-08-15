@@ -35,20 +35,24 @@ pub fn increment_lambda_failure() {
 }
 
 /// Business Logic Metrics
-pub fn set_activities_with_gps_count(count: u64) {
-    gauge!("activities_with_gps_count").set(count as f64);
+pub fn increment_activities_with_gps(count: u64) {
+    counter!("activities_with_gps").increment(count);
 }
 
-pub fn set_activities_without_gps_count(count: u64) {
-    gauge!("activities_without_gps_count").set(count as f64);
+pub fn increment_activities_without_gps(count: u64) {
+    counter!("activities_without_gps").increment(count);
 }
 
-pub fn set_activities_skipped_unchanged(count: u64) {
+pub fn increment_activities_skipped_unchanged(count: u64) {
     counter!("activities_skipped_unchanged").increment(count);
 }
 
-pub fn set_activities_downloaded_new(count: u64) {
+pub fn increment_activities_downloaded_new(count: u64) {
     counter!("activities_downloaded_new").increment(count);
+}
+
+pub fn increment_activities_failed(count: u64) {
+    counter!("activities_failed").increment(count);
 }
 
 
