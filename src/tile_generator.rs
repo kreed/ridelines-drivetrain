@@ -57,9 +57,9 @@ impl TileGenerator {
     ) -> Result<(), Box<dyn std::error::Error>> {
         // Load the existing activity archive
         let existing_archive = ActivityArchiveManager::load_existing(
-            self.s3_client.clone(),
-            self.s3_bucket.clone(),
-            self.athlete_id.clone(),
+            &self.s3_client,
+            &self.s3_bucket,
+            &self.athlete_id,
         )
         .await?;
 
