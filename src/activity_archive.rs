@@ -31,7 +31,7 @@ impl ActivityArchive {
             .filter_map(|entry| entry.geojson_data.as_ref())
             .cloned()
             .collect();
-        
+
         info!(
             "Extracted {} GeoJSON entries from archive",
             geojson_entries.len()
@@ -44,7 +44,6 @@ pub struct ActivityArchiveManager {
     athlete_id: String,
     archive: ActivityArchive,
 }
-
 
 impl ActivityArchiveManager {
     /// Create a new empty archive manager for building a fresh archive
@@ -68,7 +67,7 @@ impl ActivityArchiveManager {
         athlete_id: &str,
     ) -> Result<ActivityArchive> {
         let archive_key = format!("athletes/{athlete_id}/activities.archive");
-        
+
         Self::load_archive(s3_client, s3_bucket, &archive_key).await
     }
 
@@ -107,11 +106,7 @@ impl ActivityArchiveManager {
     }
 
     #[time("save_archive_duration")]
-    async fn save_archive(
-        &self,
-        s3_client: &S3Client,
-        s3_bucket: &str,
-    ) -> Result<()> {
+    async fn save_archive(&self, s3_client: &S3Client, s3_bucket: &str) -> Result<()> {
         info!(
             "Saving archive with {} activities",
             self.archive.entries.len()
@@ -170,8 +165,9 @@ impl ActivityArchiveManager {
         let activity_hash = Self::compute_activity_hash(activity);
 
         // Check if activity exists with same hash in existing archive
-        if let Some(existing_entry) = existing_archive.entries.get(&activity.id) 
-            && existing_entry.activity_hash == activity_hash {
+        if let Some(existing_entry) = existing_archive.entries.get(&activity.id)
+            && existing_entry.activity_hash == activity_hash
+        {
             // Zero-copy transfer: remove from old archive and insert into new
             if let Some(entry) = existing_archive.entries.remove(&activity.id) {
                 self.archive.entries.insert(activity.id.clone(), entry);
@@ -182,11 +178,7 @@ impl ActivityArchiveManager {
     }
 
     /// Add a new or changed activity to the archive
-    pub fn add_new_activity(
-        &mut self,
-        geojson: Option<String>,
-        activity: &Activity,
-    ) -> Result<()> {
+    pub fn add_new_activity(&mut self, geojson: Option<String>, activity: &Activity) -> Result<()> {
         let activity_hash = Self::compute_activity_hash(activity);
 
         let entry = ActivityArchiveEntry {
@@ -200,11 +192,7 @@ impl ActivityArchiveManager {
         Ok(())
     }
 
-    pub async fn finalize(
-        &mut self,
-        s3_client: &S3Client,
-        s3_bucket: &str,
-    ) -> Result<()> {
+    pub async fn finalize(&mut self, s3_client: &S3Client, s3_bucket: &str) -> Result<()> {
         // Update timestamp only when finalizing
         self.archive.last_updated = chrono::Utc::now().to_rfc3339();
         self.save_archive(s3_client, s3_bucket).await
@@ -238,7 +226,6 @@ impl ActivityArchiveManager {
 
         (total_entries, geojson_entries)
     }
-
 
     /// Extend this archive with entries from another archive
     pub fn extend(&mut self, other: ActivityArchiveManager) {

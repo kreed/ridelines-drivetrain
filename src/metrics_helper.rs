@@ -25,7 +25,6 @@ pub fn increment_tippecanoe_failure() {
     counter!("tippecanoe_total", "result" => "failure").increment(1);
 }
 
-
 pub fn increment_lambda_success() {
     counter!("lambda_total", "result" => "success").increment(1);
 }
@@ -55,7 +54,6 @@ pub fn increment_activities_failed(count: u64) {
     counter!("activities_failed").increment(count);
 }
 
-
 /// Resource Usage Metrics
 pub fn record_pmtiles_file_size(size_bytes: u64) {
     gauge!("pmtiles_file_size_bytes").set(size_bytes as f64);
@@ -64,7 +62,6 @@ pub fn record_pmtiles_file_size(size_bytes: u64) {
 pub fn record_geojson_concatenated_size(size_bytes: u64) {
     gauge!("geojson_concatenated_size_bytes").set(size_bytes as f64);
 }
-
 
 /// Archive-specific Metrics
 pub fn record_archive_compression_ratio(ratio: f64) {

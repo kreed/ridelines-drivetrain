@@ -52,18 +52,13 @@ impl TileGenerator {
     }
 
     #[time("prepare_geojson_data_duration")]
-    async fn prepare_geojson_data(
-        &self,
-        temp_data_file: &str,
-    ) -> Result<()> {
+    async fn prepare_geojson_data(&self, temp_data_file: &str) -> Result<()> {
         // Load the existing activity archive
-        let data_bucket = std::env::var("S3_BUCKET").context("S3_BUCKET environment variable not set")?;
-        let existing_archive = ActivityArchiveManager::load_existing(
-            &self.s3_client,
-            &data_bucket,
-            &self.athlete_id,
-        )
-        .await?;
+        let data_bucket =
+            std::env::var("S3_BUCKET").context("S3_BUCKET environment variable not set")?;
+        let existing_archive =
+            ActivityArchiveManager::load_existing(&self.s3_client, &data_bucket, &self.athlete_id)
+                .await?;
 
         // Extract all GeoJSON data from the archive
         let geojson_entries = existing_archive.extract_geojson_data();
@@ -97,11 +92,7 @@ impl TileGenerator {
     }
 
     #[time("tippecanoe_execution_duration")]
-    async fn run_tippecanoe(
-        &self,
-        input_file: &str,
-        output_file: &str,
-    ) -> Result<()> {
+    async fn run_tippecanoe(&self, input_file: &str, output_file: &str) -> Result<()> {
         info!("Running tippecanoe: {} -> {}", input_file, output_file);
 
         let output = Command::new("/opt/bin/tippecanoe")

@@ -52,12 +52,9 @@ impl IntervalsClient {
         Self { client, api_key }
     }
 
-    pub async fn fetch_activities(
-        &self,
-        athlete_id: &str,
-    ) -> Result<Vec<Activity>> {
+    pub async fn fetch_activities(&self, athlete_id: &str) -> Result<Vec<Activity>> {
         let path = format!("{ENDPOINT}/api/v1/athlete/{athlete_id}/activities.csv");
-        
+
         match self
             .client
             .get(path)
@@ -65,27 +62,25 @@ impl IntervalsClient {
             .send()
             .await
         {
-            Ok(response) => {
-                match response.text().await {
-                    Ok(body) => {
-                        metrics_helper::increment_intervals_api_success();
-                        
-                        let mut rdr = csv::Reader::from_reader(body.as_bytes());
-                        let mut activities = Vec::new();
+            Ok(response) => match response.text().await {
+                Ok(body) => {
+                    metrics_helper::increment_intervals_api_success();
 
-                        for result in rdr.deserialize() {
-                            let activity: Activity = result?;
-                            activities.push(activity);
-                        }
+                    let mut rdr = csv::Reader::from_reader(body.as_bytes());
+                    let mut activities = Vec::new();
 
-                        Ok(activities)
+                    for result in rdr.deserialize() {
+                        let activity: Activity = result?;
+                        activities.push(activity);
                     }
-                    Err(e) => {
-                        metrics_helper::increment_intervals_api_failure();
-                        Err(e.into())
-                    }
+
+                    Ok(activities)
                 }
-            }
+                Err(e) => {
+                    metrics_helper::increment_intervals_api_failure();
+                    Err(e.into())
+                }
+            },
             Err(e) => {
                 metrics_helper::increment_intervals_api_failure();
                 Err(e.into())
@@ -118,13 +113,10 @@ impl IntervalsClient {
             }
         }
 
-        let body = response
-            .bytes()
-            .await
-            .map_err(|e| {
-                metrics_helper::increment_intervals_api_failure();
-                DownloadError::Network(reqwest_middleware::Error::Reqwest(e))
-            })?;
+        let body = response.bytes().await.map_err(|e| {
+            metrics_helper::increment_intervals_api_failure();
+            DownloadError::Network(reqwest_middleware::Error::Reqwest(e))
+        })?;
 
         metrics_helper::increment_intervals_api_success();
         Ok(Some(body.to_vec()))

@@ -162,8 +162,7 @@ pub async fn convert_fit_to_geojson(
     };
 
     // Convert to GeoJSON string (compact format for smaller size)
-    let geojson_string =
-        serde_json::to_string(&GeoJson::FeatureCollection(feature_collection))?;
+    let geojson_string = serde_json::to_string(&GeoJson::FeatureCollection(feature_collection))?;
 
     Ok(Some(geojson_string))
 }
