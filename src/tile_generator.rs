@@ -22,32 +22,32 @@ impl TileGenerator {
         }
     }
 
-    #[time("generate_mbtiles_duration")]
-    pub async fn generate_mbtiles(&self) -> Result<String, Box<dyn std::error::Error>> {
+    #[time("generate_pmtiles_duration")]
+    pub async fn generate_pmtiles(&self) -> Result<(), Box<dyn std::error::Error>> {
         info!(
-            "Starting MBTiles generation for athlete {}",
+            "Starting PMTiles generation for athlete {}",
             self.athlete_id
         );
 
         // Create temporary files
         let temp_data_file = format!("/tmp/all-activities-{}.dat", self.athlete_id);
-        let temp_mbtiles_file = format!("/tmp/{}.mbtiles", self.athlete_id);
+        let temp_pmtiles_file = format!("/tmp/{}.pmtiles", self.athlete_id);
 
         // Phase 1: List, download, and concatenate GeoJSON files (timed)
         self.prepare_geojson_data(&temp_data_file).await?;
 
-        // Phase 2: Run tippecanoe to generate MBTiles (timed)
-        self.run_tippecanoe(&temp_data_file, &temp_mbtiles_file)
+        // Phase 2: Run tippecanoe to generate PMTiles (timed)
+        self.run_tippecanoe(&temp_data_file, &temp_pmtiles_file)
             .await?;
 
-        // Phase 3: Upload MBTiles to S3 (timed)
-        self.upload_mbtiles(&temp_mbtiles_file).await?;
+        // Phase 3: Upload PMTiles to S3 (timed)
+        self.upload_pmtiles(&temp_pmtiles_file).await?;
 
-        // Clean up temp data file
+        // Clean up temp files
         let _ = fs::remove_file(&temp_data_file).await;
+        let _ = fs::remove_file(&temp_pmtiles_file).await;
 
-        // Return path to temp mbtiles file for further processing
-        Ok(temp_mbtiles_file)
+        Ok(())
     }
 
     #[time("prepare_geojson_data_duration")]
@@ -133,39 +133,39 @@ impl TileGenerator {
         Ok(())
     }
 
-    #[time("mbtiles_upload_duration")]
-    async fn upload_mbtiles(&self, mbtiles_file: &str) -> Result<(), Box<dyn std::error::Error>> {
-        info!("Uploading MBTiles file to S3: {}", mbtiles_file);
+    #[time("pmtiles_upload_duration")]
+    async fn upload_pmtiles(&self, pmtiles_file: &str) -> Result<(), Box<dyn std::error::Error>> {
+        info!("Uploading PMTiles file to S3: {}", pmtiles_file);
 
-        // Read the MBTiles file
-        let file_content = fs::read(mbtiles_file)
+        // Read the PMTiles file
+        let file_content = fs::read(pmtiles_file)
             .await
-            .map_err(|e| format!("Failed to read MBTiles file: {e}"))?;
+            .map_err(|e| format!("Failed to read PMTiles file: {e}"))?;
 
-        // Record MBTiles file size
-        metrics_helper::record_mbtiles_file_size(file_content.len() as u64);
+        // Record PMTiles file size
+        metrics_helper::record_pmtiles_file_size(file_content.len() as u64);
 
-        // Upload to S3
-        let s3_key = format!("athletes/{}.mbtiles", self.athlete_id);
+        // Upload to website S3 bucket
+        let s3_key = format!("strava/{}.pmtiles", self.athlete_id);
 
         match self
             .s3_client
             .put_object()
-            .bucket(&self.s3_bucket)
+            .bucket("kreed.org-website")
             .key(&s3_key)
             .body(ByteStream::from(file_content))
-            .content_type("application/vnd.mapbox-vector-tile")
+            .content_type("application/vnd.pmtiles")
             .send()
             .await
         {
             Ok(_) => {
                 metrics_helper::increment_s3_upload_success();
-                info!("Successfully uploaded MBTiles to S3: {}", s3_key);
+                info!("Successfully uploaded PMTiles to website S3: {}", s3_key);
                 Ok(())
             }
             Err(e) => {
                 metrics_helper::increment_s3_upload_failure();
-                Err(format!("Failed to upload MBTiles to S3: {e}").into())
+                Err(format!("Failed to upload PMTiles to S3: {e}").into())
             }
         }
     }
