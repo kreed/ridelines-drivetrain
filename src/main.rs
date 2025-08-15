@@ -1,9 +1,12 @@
 use aws_lambda_events::event::eventbridge::EventBridgeEvent;
-use lambda_runtime::{Error, LambdaEvent, run, service_fn, tracing};
+use lambda_runtime::{Error, LambdaEvent};
+use metrics_cloudwatch_embedded::lambda::handler::run;
+use tracing::info_span;
 
 use aws_config::BehaviorVersion;
 use aws_sdk_s3::Client as S3Client;
 use aws_sdk_secretsmanager::Client as SecretsManagerClient;
+use function_timer::time;
 use std::env;
 
 mod activity_sync;
@@ -18,9 +21,22 @@ use crate::tile_uploader::TileUploader;
 
 #[tokio::main]
 async fn main() -> Result<(), Error> {
-    tracing::init_default_subscriber();
+    tracing_subscriber::fmt()
+        .json()
+        .with_env_filter(tracing_subscriber::filter::EnvFilter::from_default_env())
+        .with_target(false)
+        .with_current_span(false)
+        .without_time()
+        .init();
 
-    run(service_fn(function_handler)).await
+    let metrics = metrics_cloudwatch_embedded::Builder::new()
+        .cloudwatch_namespace("IntervalsMapper")
+        .lambda_cold_start_span(info_span!("cold start"))
+        .lambda_cold_start_metric("ColdStart")
+        .with_lambda_request_id("RequestId")
+        .init()?;
+
+    run(metrics, function_handler).await
 }
 
 /// This is the main body for the function.
@@ -28,6 +44,7 @@ async fn main() -> Result<(), Error> {
 /// There are some code example in the following URLs:
 /// - https://github.com/awslabs/aws-lambda-rust-runtime/tree/main/examples
 /// - https://github.com/aws-samples/serverless-rust-demo/
+#[time("lambda_handler_duration")]
 pub(crate) async fn function_handler(event: LambdaEvent<EventBridgeEvent>) -> Result<(), Error> {
     // Extract some useful information from the request
     let (payload, _context) = event.into_parts();
@@ -64,6 +81,7 @@ pub(crate) async fn function_handler(event: LambdaEvent<EventBridgeEvent>) -> Re
     let api_key = secret_value
         .secret_string()
         .ok_or_else(|| Error::from("Secret string not found"))?;
+
 
     // Sync activities directly to S3
     let sync_job = SyncJob::new(api_key, athlete_id, s3_client.clone(), &s3_bucket);

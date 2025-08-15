@@ -1,5 +1,6 @@
 use aws_sdk_s3::Client as S3Client;
 use aws_sdk_s3::primitives::ByteStream;
+use function_timer::time;
 use rusqlite::Connection;
 use tracing::info;
 
@@ -16,6 +17,7 @@ impl TileUploader {
         }
     }
 
+    #[time("extract_and_upload_tiles_duration")]
     pub async fn extract_and_upload_tiles(&self, mbtiles_file: &str, _temp_tiles_dir: &str) -> Result<(), Box<dyn std::error::Error>> {
         info!("Extracting tiles from MBTiles using rusqlite: {}", mbtiles_file);
         

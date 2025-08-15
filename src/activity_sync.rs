@@ -2,6 +2,7 @@ use crate::convert::convert_fit_to_geojson;
 use crate::intervals_client::{Activity, DownloadError, IntervalsClient};
 use aws_sdk_s3::Client as S3Client;
 use aws_sdk_s3::primitives::ByteStream;
+use function_timer::time;
 use futures::stream::{self, StreamExt};
 use sanitize_filename::sanitize;
 use std::collections::HashSet;
@@ -49,6 +50,7 @@ impl SyncJob {
         }
     }
 
+    #[time("sync_activities_duration")]
     pub async fn sync_activities(&self) -> Result<(), Box<dyn std::error::Error>> {
         info!("Starting sync to S3 bucket: {}, athlete: {}", self.s3_bucket, self.athlete_id);
         
@@ -153,6 +155,7 @@ impl SyncJob {
         self.download_and_process_activity(&activity, &geojson_key, &stub_key, orphaned_files).await;
     }
 
+    #[time("download_activity")]
     async fn download_and_process_activity(
         &self, 
         activity: &Activity, 
@@ -222,6 +225,7 @@ impl SyncJob {
         }
     }
 
+    #[time("upload_activity_s3_duration")]
     async fn write_geojson_to_s3(&self, geojson_key: &str, data: String, orphaned_files: Arc<Mutex<HashSet<String>>>) {
         let result = self.s3_client
             .put_object()

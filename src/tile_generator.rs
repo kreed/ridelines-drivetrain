@@ -1,5 +1,6 @@
 use aws_sdk_s3::Client as S3Client;
 use aws_sdk_s3::primitives::ByteStream;
+use function_timer::time;
 use std::process::Command;
 use tokio::fs;
 use tracing::{info, warn, error};
@@ -19,9 +20,32 @@ impl TileGenerator {
         }
     }
 
+    #[time("generate_mbtiles_duration")]
     pub async fn generate_mbtiles(&self) -> Result<String, Box<dyn std::error::Error>> {
         info!("Starting MBTiles generation for athlete {}", self.athlete_id);
         
+        // Create temporary files
+        let temp_data_file = format!("/tmp/all-activities-{}.dat", self.athlete_id);
+        let temp_mbtiles_file = format!("/tmp/{}.mbtiles", self.athlete_id);
+        
+        // Phase 1: List, download, and concatenate GeoJSON files (timed)
+        self.prepare_geojson_data(&temp_data_file).await?;
+        
+        // Phase 2: Run tippecanoe to generate MBTiles (timed)
+        self.run_tippecanoe(&temp_data_file, &temp_mbtiles_file).await?;
+        
+        // Phase 3: Upload MBTiles to S3 (timed)
+        self.upload_mbtiles(&temp_mbtiles_file).await?;
+        
+        // Clean up temp data file
+        let _ = fs::remove_file(&temp_data_file).await;
+        
+        // Return path to temp mbtiles file for further processing
+        Ok(temp_mbtiles_file)
+    }
+
+    #[time("prepare_geojson_data_duration")]
+    async fn prepare_geojson_data(&self, temp_data_file: &str) -> Result<(), Box<dyn std::error::Error>> {
         // Get all .geojson files
         let geojson_files = self.list_geojson_files().await?;
         
@@ -31,24 +55,10 @@ impl TileGenerator {
         
         info!("Found {} GeoJSON files to process", geojson_files.len());
         
-        // Create temporary files
-        let temp_data_file = format!("/tmp/all-activities-{}.dat", self.athlete_id);
-        let temp_mbtiles_file = format!("/tmp/{}.mbtiles", self.athlete_id);
-        
         // Concatenate all file contents to temp file
-        self.concatenate_geojson_files(&geojson_files, &temp_data_file).await?;
+        self.concatenate_geojson_files(&geojson_files, temp_data_file).await?;
         
-        // Run tippecanoe to generate MBTiles
-        self.run_tippecanoe(&temp_data_file, &temp_mbtiles_file).await?;
-        
-        // Upload MBTiles to S3
-        self.upload_mbtiles(&temp_mbtiles_file).await?;
-        
-        // Clean up temp data file
-        let _ = fs::remove_file(&temp_data_file).await;
-        
-        // Return path to temp mbtiles file for further processing
-        Ok(temp_mbtiles_file)
+        Ok(())
     }
 
     async fn list_geojson_files(&self) -> Result<Vec<String>, Box<dyn std::error::Error>> {
@@ -113,6 +123,7 @@ impl TileGenerator {
         Ok(content)
     }
 
+    #[time("tippecanoe_execution_duration")]
     async fn run_tippecanoe(&self, input_file: &str, output_file: &str) -> Result<(), Box<dyn std::error::Error>> {
         info!("Running tippecanoe: {} -> {}", input_file, output_file);
         
@@ -143,6 +154,7 @@ impl TileGenerator {
         Ok(())
     }
 
+    #[time("mbtiles_upload_duration")]
     async fn upload_mbtiles(&self, mbtiles_file: &str) -> Result<(), Box<dyn std::error::Error>> {
         info!("Uploading MBTiles file to S3: {}", mbtiles_file);
         
