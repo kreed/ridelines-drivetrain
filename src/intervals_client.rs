@@ -1,3 +1,4 @@
+use crate::metrics_helper;
 use base64::prelude::*;
 use reqwest::StatusCode;
 use reqwest_middleware::{ClientBuilder, ClientWithMiddleware};
@@ -55,27 +56,43 @@ impl IntervalsClient {
         athlete_id: &str,
     ) -> Result<Vec<Activity>, Box<dyn std::error::Error>> {
         let path = format!("{ENDPOINT}/api/v1/athlete/{athlete_id}/activities.csv");
-        let body = self
+        
+        match self
             .client
             .get(path)
             .header("Authorization", self.auth_header())
             .send()
-            .await?
-            .text()
-            .await?;
+            .await
+        {
+            Ok(response) => {
+                match response.text().await {
+                    Ok(body) => {
+                        metrics_helper::increment_intervals_api_success();
+                        
+                        let mut rdr = csv::Reader::from_reader(body.as_bytes());
+                        let mut activities = Vec::new();
 
-        let mut rdr = csv::Reader::from_reader(body.as_bytes());
-        let mut activities = Vec::new();
+                        for result in rdr.deserialize() {
+                            let activity: Activity = result?;
+                            activities.push(activity);
+                        }
 
-        for result in rdr.deserialize() {
-            let activity: Activity = result?;
-            activities.push(activity);
+                        Ok(activities)
+                    }
+                    Err(e) => {
+                        metrics_helper::increment_intervals_api_failure();
+                        Err(e.into())
+                    }
+                }
+            }
+            Err(e) => {
+                metrics_helper::increment_intervals_api_failure();
+                Err(e.into())
+            }
         }
-
-        Ok(activities)
     }
 
-    pub async fn download_fit(&self, activity_id: &str) -> Result<Vec<u8>, DownloadError> {
+    pub async fn download_fit(&self, activity_id: &str) -> Result<Option<Vec<u8>>, DownloadError> {
         let path = format!("{ENDPOINT}/api/v1/activity/{activity_id}/fit-file");
         let response = self
             .client
@@ -83,19 +100,33 @@ impl IntervalsClient {
             .header("Authorization", self.auth_header())
             .send()
             .await
-            .map_err(DownloadError::Network)?;
+            .map_err(|e| {
+                metrics_helper::increment_intervals_api_failure();
+                DownloadError::Network(e)
+            })?;
 
         let status = response.status();
         if !status.is_success() {
-            return Err(DownloadError::Http(status));
+            if status.as_u16() == 422 {
+                // HTTP 422 means no GPS data available - return None
+                metrics_helper::increment_intervals_api_success();
+                return Ok(None);
+            } else {
+                metrics_helper::increment_intervals_api_failure();
+                return Err(DownloadError::Http(status));
+            }
         }
 
         let body = response
             .bytes()
             .await
-            .map_err(|e| DownloadError::Network(reqwest_middleware::Error::Reqwest(e)))?;
+            .map_err(|e| {
+                metrics_helper::increment_intervals_api_failure();
+                DownloadError::Network(reqwest_middleware::Error::Reqwest(e))
+            })?;
 
-        Ok(body.to_vec())
+        metrics_helper::increment_intervals_api_success();
+        Ok(Some(body.to_vec()))
     }
 
     fn auth_header(&self) -> String {

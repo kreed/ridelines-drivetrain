@@ -58,9 +58,6 @@ pub fn set_activities_downloaded_new(count: u64) {
     counter!("activities_downloaded_new").increment(count);
 }
 
-pub fn set_activities_deleted(count: u64) {
-    counter!("activities_deleted_count").increment(count);
-}
 
 /// Resource Usage Metrics
 pub fn record_mbtiles_file_size(size_bytes: u64) {
@@ -73,4 +70,13 @@ pub fn record_geojson_concatenated_size(size_bytes: u64) {
 
 pub fn set_total_tiles_generated(count: u64) {
     gauge!("total_tiles_generated").set(count as f64);
+}
+
+/// Archive-specific Metrics
+pub fn record_archive_compression_ratio(ratio: f64) {
+    gauge!("archive_compression_ratio").set(ratio);
+}
+
+pub fn record_archive_size_bytes(size_bytes: u64) {
+    gauge!("archive_size_bytes").set(size_bytes as f64);
 }

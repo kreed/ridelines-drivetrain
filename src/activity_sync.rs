@@ -1,15 +1,12 @@
+use crate::activity_archive::{ActivityArchive, ActivityArchiveManager};
 use crate::convert::convert_fit_to_geojson;
-use crate::intervals_client::{Activity, DownloadError, IntervalsClient};
+use crate::intervals_client::{Activity, IntervalsClient};
 use crate::metrics_helper;
 use aws_sdk_s3::Client as S3Client;
-use aws_sdk_s3::primitives::ByteStream;
 use function_timer::time;
-use futures::stream::{self, StreamExt};
-use sanitize_filename::sanitize;
-use std::collections::HashSet;
 use std::sync::{Arc, Mutex};
 use tokio::sync::Semaphore;
-use tracing::{error, info, warn};
+use tracing::{error, info};
 
 #[derive(Debug)]
 pub struct DownloadStats {
@@ -17,7 +14,6 @@ pub struct DownloadStats {
     pub skipped_unchanged: usize,
     pub downloaded_empty: usize,
     pub failed: usize,
-    pub deleted: usize,
 }
 
 pub struct SyncJob {
@@ -25,27 +21,22 @@ pub struct SyncJob {
     s3_client: S3Client,
     s3_bucket: String,
     athlete_id: String,
-    s3_prefix: String,
     stats: Arc<Mutex<DownloadStats>>,
     semaphore: Arc<Semaphore>,
 }
 
 impl SyncJob {
     pub fn new(api_key: &str, athlete_id: &str, s3_client: S3Client, s3_bucket: &str) -> Self {
-        let s3_prefix = format!("athletes/{athlete_id}");
-
         Self {
             intervals_client: IntervalsClient::new(api_key.to_string()),
             s3_client,
             s3_bucket: s3_bucket.to_string(),
             athlete_id: athlete_id.to_string(),
-            s3_prefix,
             stats: Arc::new(Mutex::new(DownloadStats {
                 downloaded: 0,
                 skipped_unchanged: 0,
                 downloaded_empty: 0,
                 failed: 0,
-                deleted: 0,
             })),
             semaphore: Arc::new(Semaphore::new(5)),
         }
@@ -54,11 +45,31 @@ impl SyncJob {
     #[time("sync_activities_duration")]
     pub async fn sync_activities(&self) -> Result<(), Box<dyn std::error::Error>> {
         info!(
-            "Starting sync to S3 bucket: {}, athlete: {}",
+            "Starting simplified archive-based sync to S3 bucket: {}, athlete: {}",
             self.s3_bucket, self.athlete_id
         );
 
-        let activities = self.fetch_activities().await?;
+        // Load existing archive (or create empty if none exists)
+        let mut existing_archive = match ActivityArchiveManager::load_existing(
+            self.s3_client.clone(),
+            self.s3_bucket.clone(),
+            self.athlete_id.clone(),
+        ).await {
+            Ok(archive) => Some(archive),
+            Err(_) => {
+                info!("No existing archive found, starting fresh");
+                None
+            }
+        };
+
+        // Create new empty archive for this sync
+        let mut new_archive = ActivityArchiveManager::new_empty(
+            self.s3_client.clone(),
+            self.s3_bucket.clone(),
+            self.athlete_id.clone(),
+        );
+
+        let activities = self.intervals_client.fetch_activities(&self.athlete_id).await?;
         if activities.is_empty() {
             info!("No activities found for athlete {}", self.athlete_id);
             return Ok(());
@@ -70,103 +81,29 @@ impl SyncJob {
             self.athlete_id
         );
 
-        let orphaned_files = self.get_existing_files().await?;
-        self.process_activities_batch(activities, orphaned_files.clone())
-            .await;
-        self.cleanup_orphaned_files(orphaned_files).await;
+        // Process each activity: transfer unchanged or download new/changed
+        for activity in activities {
+            self.process_single_activity(
+                activity,
+                &mut new_archive,
+                &mut existing_archive,
+            ).await;
+        }
+
+        // Save the new archive (completely replaces old one)
+        new_archive.finalize().await?;
+
         self.report_results();
 
         Ok(())
     }
 
-    async fn fetch_activities(&self) -> Result<Vec<Activity>, Box<dyn std::error::Error>> {
-        match self
-            .intervals_client
-            .fetch_activities(&self.athlete_id)
-            .await
-        {
-            Ok(activities) => {
-                metrics_helper::increment_intervals_api_success();
-                Ok(activities)
-            }
-            Err(e) => {
-                metrics_helper::increment_intervals_api_failure();
-                error!("Error fetching activities: {e}");
-                Err(e)
-            }
-        }
-    }
-
-    async fn get_existing_files(
-        &self,
-    ) -> Result<Arc<Mutex<HashSet<String>>>, Box<dyn std::error::Error>> {
-        let files = self
-            .list_activity_files(&[".geojson", ".stub"])
-            .await
-            .unwrap_or_else(|e| {
-                warn!("Failed to get existing S3 files: {e}");
-                Vec::new()
-            })
-            .into_iter()
-            .collect();
-
-        Ok(Arc::new(Mutex::new(files)))
-    }
-
-    async fn list_activity_files(
-        &self,
-        extensions: &[&str],
-    ) -> Result<Vec<String>, Box<dyn std::error::Error>> {
-        match self
-            .s3_client
-            .list_objects_v2()
-            .bucket(&self.s3_bucket)
-            .prefix(&self.s3_prefix)
-            .into_paginator()
-            .send()
-            .try_collect()
-            .await
-        {
-            Ok(results) => {
-                metrics_helper::increment_s3_upload_success();
-                let files = results
-                    .into_iter()
-                    .flat_map(|output| output.contents.unwrap_or_default())
-                    .filter_map(|object| object.key)
-                    .filter(|key| extensions.iter().any(|ext| key.ends_with(ext)))
-                    .collect();
-                Ok(files)
-            }
-            Err(e) => {
-                metrics_helper::increment_s3_upload_failure();
-                Err(e.into())
-            }
-        }
-    }
-
-    async fn process_activities_batch(
-        &self,
-        activities: Vec<Activity>,
-        orphaned_files: Arc<Mutex<HashSet<String>>>,
-    ) {
-        info!("Starting sync of {} activities", activities.len());
-
-        stream::iter(activities)
-            .map(|activity| {
-                let orphaned_files = orphaned_files.clone();
-                self.process_single_activity(activity, orphaned_files)
-            })
-            .buffer_unordered(5)
-            .collect::<Vec<_>>()
-            .await;
-
-        info!("Activity processing complete");
-    }
 
     async fn process_single_activity(
         &self,
         activity: Activity,
-        orphaned_files: Arc<Mutex<HashSet<String>>>,
+        new_archive: &mut ActivityArchiveManager,
+        existing_archive: &mut Option<ActivityArchive>,
     ) {
         let _permit = self.semaphore.acquire().await.unwrap();
 
@@ -175,91 +112,55 @@ impl SyncJob {
             activity.name, activity.id
         );
 
-        let geojson_key = self.generate_key(&activity, "geojson");
-        let stub_key = self.generate_key(&activity, "stub");
-
-        let geojson_exists = orphaned_files.lock().unwrap().contains(&geojson_key);
-        let stub_exists = orphaned_files.lock().unwrap().contains(&stub_key);
-
-        // Check for bad state (both files exist) - redownload
-        if geojson_exists && stub_exists {
-            warn!(
-                "Both .geojson and .stub files exist for activity {}, redownloading",
-                activity.id
-            );
-        } else if geojson_exists || stub_exists {
-            // One file exists, skip and remove both types from orphaned files
-            if let Ok(mut stats) = self.stats.lock() {
-                stats.skipped_unchanged += 1;
+        // Try to transfer unchanged entry from existing archive
+        if let Some(existing) = existing_archive {
+            if new_archive.transfer_unchanged_entry(existing, &activity) {
+                if let Ok(mut stats) = self.stats.lock() {
+                    stats.skipped_unchanged += 1;
+                }
+                return;
             }
-            if let Ok(mut orphaned) = orphaned_files.lock() {
-                orphaned.remove(&geojson_key);
-                orphaned.remove(&stub_key);
-            }
-            return;
         }
 
-        // Neither file exists, download activity
-        self.download_and_process_activity(&activity, &geojson_key, &stub_key, orphaned_files)
-            .await;
+        // Activity is new or changed, download and process
+        self.download_and_add_activity(&activity, new_archive).await;
     }
 
     #[time("download_activity")]
-    async fn download_and_process_activity(
+    async fn download_and_add_activity(
         &self,
         activity: &Activity,
-        geojson_key: &str,
-        stub_key: &str,
-        orphaned_files: Arc<Mutex<HashSet<String>>>,
+        new_archive: &mut ActivityArchiveManager,
     ) {
-        // Helper function to write empty stub file to S3 and update stats
-        let write_empty_file = || async {
-            let result = self
-                .s3_client
-                .put_object()
-                .bucket(&self.s3_bucket)
-                .key(stub_key)
-                .body(ByteStream::from_static(b""))
-                .send()
-                .await;
-
-            match result {
-                Ok(_) => {
-                    metrics_helper::increment_s3_upload_success();
-                    if let Ok(mut stats) = self.stats.lock() {
-                        stats.downloaded_empty += 1;
-                    }
-                    // Remove the stub file from orphaned files list
-                    if let Ok(mut orphaned) = orphaned_files.lock() {
-                        orphaned.remove(stub_key);
-                    }
-                }
-                Err(e) => {
-                    metrics_helper::increment_s3_upload_failure();
-                    error!(
-                        "Failed to write stub file to S3 for activity {}: {}",
-                        activity.id, e
-                    );
-                    if let Ok(mut stats) = self.stats.lock() {
-                        stats.failed += 1;
-                    }
-                }
-            }
-        };
-
         // Download with retry logic handled by middleware
         match self.intervals_client.download_fit(&activity.id).await {
-            Ok(fit_data) => {
-                metrics_helper::increment_intervals_api_success();
+            Ok(Some(fit_data)) => {
                 // Convert FIT to GeoJSON
                 match convert_fit_to_geojson(&fit_data, activity).await {
-                    Ok(Some(data)) => {
-                        self.write_geojson_to_s3(geojson_key, data, orphaned_files)
-                            .await;
+                    Ok(Some(geojson_data)) => {
+                        // Add activity with GeoJSON data to new archive
+                        if let Err(e) = new_archive
+                            .add_new_activity(Some(geojson_data), activity)
+                            .await
+                        {
+                            error!("Failed to add activity {} to archive: {}", activity.id, e);
+                            if let Ok(mut stats) = self.stats.lock() {
+                                stats.failed += 1;
+                            }
+                        } else if let Ok(mut stats) = self.stats.lock() {
+                            stats.downloaded += 1;
+                        }
                     }
                     Ok(None) => {
-                        // No GPS data found in FIT file - write empty file
-                        write_empty_file().await;
+                        // No GPS data found in FIT file - add without GeoJSON
+                        if let Err(e) = new_archive.add_new_activity(None, activity).await {
+                            error!("Failed to add activity {} to archive: {}", activity.id, e);
+                            if let Ok(mut stats) = self.stats.lock() {
+                                stats.failed += 1;
+                            }
+                        } else if let Ok(mut stats) = self.stats.lock() {
+                            stats.downloaded_empty += 1;
+                        }
                     }
                     Err(e) => {
                         error!(
@@ -272,13 +173,18 @@ impl SyncJob {
                     }
                 }
             }
-            Err(DownloadError::Http(status)) if status.as_u16() == 422 => {
-                // HTTP 422 usually means no GPS data available - write empty file
-                metrics_helper::increment_intervals_api_success(); // This is actually a successful API call
-                write_empty_file().await;
+            Ok(None) => {
+                // HTTP 422 response - no GPS data available, add without GeoJSON
+                if let Err(e) = new_archive.add_new_activity(None, activity).await {
+                    error!("Failed to add activity {} to archive: {}", activity.id, e);
+                    if let Ok(mut stats) = self.stats.lock() {
+                        stats.failed += 1;
+                    }
+                } else if let Ok(mut stats) = self.stats.lock() {
+                    stats.downloaded_empty += 1;
+                }
             }
             Err(e) => {
-                metrics_helper::increment_intervals_api_failure();
                 error!("Failed to download activity {}: {}", activity.id, e);
                 if let Ok(mut stats) = self.stats.lock() {
                     stats.failed += 1;
@@ -287,132 +193,11 @@ impl SyncJob {
         }
     }
 
-    #[time("upload_activity_s3_duration")]
-    async fn write_geojson_to_s3(
-        &self,
-        geojson_key: &str,
-        data: String,
-        orphaned_files: Arc<Mutex<HashSet<String>>>,
-    ) {
-        let result = self
-            .s3_client
-            .put_object()
-            .bucket(&self.s3_bucket)
-            .key(geojson_key)
-            .body(ByteStream::from(data.into_bytes()))
-            .content_type("application/geo+json")
-            .send()
-            .await;
-
-        match result {
-            Ok(_) => {
-                metrics_helper::increment_s3_upload_success();
-                if let Ok(mut stats) = self.stats.lock() {
-                    stats.downloaded += 1;
-                }
-                // Remove the geojson file from orphaned files list
-                if let Ok(mut orphaned) = orphaned_files.lock() {
-                    orphaned.remove(geojson_key);
-                }
-            }
-            Err(e) => {
-                metrics_helper::increment_s3_upload_failure();
-                error!("Failed to write GeoJSON file to S3 for activity: {}", e);
-                if let Ok(mut stats) = self.stats.lock() {
-                    stats.failed += 1;
-                }
-            }
-        }
-    }
-
-    async fn cleanup_orphaned_files(&self, orphaned_files: Arc<Mutex<HashSet<String>>>) {
-        // Delete all remaining orphaned files from S3
-        let orphaned_files_to_delete: Vec<String> = {
-            let guard = orphaned_files.lock().unwrap();
-            guard.iter().cloned().collect()
-        };
-        let deleted_count = orphaned_files_to_delete.len();
-        for s3_key in &orphaned_files_to_delete {
-            let result = self
-                .s3_client
-                .delete_object()
-                .bucket(&self.s3_bucket)
-                .key(s3_key)
-                .send()
-                .await;
-
-            if let Err(e) = result {
-                metrics_helper::increment_s3_upload_failure();
-                warn!("Failed to delete orphaned S3 object {s3_key}: {e}");
-            } else {
-                metrics_helper::increment_s3_upload_success();
-                info!("Deleted orphaned S3 object: {s3_key}");
-            }
-        }
-
-        // Update deleted count in stats
-        if let Ok(mut stats) = self.stats.lock() {
-            stats.deleted = deleted_count;
-        }
-    }
-
     fn report_results(&self) {
-        // Extract final stats
         let final_stats = self.stats.lock().unwrap();
-        info!("Sync summary:");
-        info!("  Downloaded: {}", final_stats.downloaded);
-        info!("  Skipped (unchanged): {}", final_stats.skipped_unchanged);
-        info!(
-            "  Downloaded (empty/no GPS): {}",
-            final_stats.downloaded_empty
-        );
-        info!("  Deleted (obsolete): {}", final_stats.deleted);
-        info!("  Errors: {}", final_stats.failed);
-
-        // Emit business logic metrics
         metrics_helper::set_activities_with_gps_count(final_stats.downloaded as u64);
         metrics_helper::set_activities_without_gps_count(final_stats.downloaded_empty as u64);
         metrics_helper::set_activities_skipped_unchanged(final_stats.skipped_unchanged as u64);
         metrics_helper::set_activities_downloaded_new(final_stats.downloaded as u64);
-        metrics_helper::set_activities_deleted(final_stats.deleted as u64);
-    }
-
-    fn generate_key(&self, activity: &Activity, extension: &str) -> String {
-        let date = parse_iso_date(&activity.start_date_local);
-        let sanitized_name = sanitize(&activity.name);
-        let sanitized_type = sanitize(&activity.activity_type);
-        let distance_str = format_distance(activity.distance);
-        let elapsed_time_str = format_elapsed_time(activity.elapsed_time);
-
-        format!(
-            "athletes/{}/{date}-{sanitized_name}-{sanitized_type}-{distance_str}-{elapsed_time_str}-{}.{extension}",
-            self.athlete_id, activity.id
-        )
-    }
-}
-
-fn parse_iso_date(date_str: &str) -> String {
-    // Extract just the date part (YYYY-MM-DD) from ISO datetime
-    date_str.split('T').next().unwrap_or(date_str).to_string()
-}
-
-fn format_distance(distance: Option<f64>) -> String {
-    match distance {
-        Some(d) => format!("{:.2}km", d / 1000.0),
-        None => "0.00km".to_string(),
-    }
-}
-
-fn format_elapsed_time(elapsed_seconds: i64) -> String {
-    let hours = elapsed_seconds / 3600;
-    let minutes = (elapsed_seconds % 3600) / 60;
-    let seconds = elapsed_seconds % 60;
-
-    if hours > 0 {
-        format!("{hours}h{minutes}m{seconds}s")
-    } else if minutes > 0 {
-        format!("{minutes}m{seconds}s")
-    } else {
-        format!("{seconds}s")
     }
 }

@@ -9,6 +9,7 @@ use aws_sdk_secretsmanager::Client as SecretsManagerClient;
 use function_timer::time;
 use std::env;
 
+mod activity_archive;
 mod activity_sync;
 mod convert;
 mod intervals_client;

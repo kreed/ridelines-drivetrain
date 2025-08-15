@@ -1,10 +1,11 @@
+use crate::activity_archive::ActivityArchiveManager;
 use crate::metrics_helper;
 use aws_sdk_s3::Client as S3Client;
 use aws_sdk_s3::primitives::ByteStream;
 use function_timer::time;
 use std::process::Command;
 use tokio::fs;
-use tracing::{error, info, warn};
+use tracing::{error, info};
 
 pub struct TileGenerator {
     s3_client: S3Client,
@@ -54,75 +55,28 @@ impl TileGenerator {
         &self,
         temp_data_file: &str,
     ) -> Result<(), Box<dyn std::error::Error>> {
-        // Get all .geojson files
-        let geojson_files = self.list_geojson_files().await?;
+        // Load the existing activity archive
+        let existing_archive = ActivityArchiveManager::load_existing(
+            self.s3_client.clone(),
+            self.s3_bucket.clone(),
+            self.athlete_id.clone(),
+        )
+        .await?;
 
-        if geojson_files.is_empty() {
-            return Err("No GeoJSON files found to process".into());
+        // Extract all GeoJSON data from the archive
+        let geojson_entries = existing_archive.extract_geojson_data();
+
+        if geojson_entries.is_empty() {
+            return Err("No GeoJSON data found in archive".into());
         }
 
-        info!("Found {} GeoJSON files to process", geojson_files.len());
+        info!("Found {} GeoJSON entries in archive", geojson_entries.len());
 
-        // Concatenate all file contents to temp file
-        self.concatenate_geojson_files(&geojson_files, temp_data_file)
-            .await?;
-
-        Ok(())
-    }
-
-    async fn list_geojson_files(&self) -> Result<Vec<String>, Box<dyn std::error::Error>> {
-        let s3_prefix = format!("athletes/{}", self.athlete_id);
-
-        match self
-            .s3_client
-            .list_objects_v2()
-            .bucket(&self.s3_bucket)
-            .prefix(&s3_prefix)
-            .into_paginator()
-            .send()
-            .try_collect()
-            .await
-        {
-            Ok(results) => {
-                metrics_helper::increment_s3_upload_success();
-                let files = results
-                    .into_iter()
-                    .flat_map(|output| output.contents.unwrap_or_default())
-                    .filter_map(|object| object.key)
-                    .filter(|key| key.ends_with(".geojson"))
-                    .collect();
-                Ok(files)
-            }
-            Err(e) => {
-                metrics_helper::increment_s3_upload_failure();
-                Err(e.into())
-            }
-        }
-    }
-
-    async fn concatenate_geojson_files(
-        &self,
-        geojson_files: &[String],
-        temp_data_file: &str,
-    ) -> Result<(), Box<dyn std::error::Error>> {
+        // Concatenate all GeoJSON entries
         let mut concatenated_content = String::new();
-        let mut successful_files = 0;
-
-        for file_key in geojson_files {
-            match self.get_file_content(file_key).await {
-                Ok(content) => {
-                    concatenated_content.push_str(&content);
-                    concatenated_content.push('\n'); // Add newline between files
-                    successful_files += 1;
-                }
-                Err(e) => {
-                    warn!("Failed to read file {} for concatenation: {}", file_key, e);
-                }
-            }
-        }
-
-        if successful_files == 0 {
-            return Err("No files could be read for processing".into());
+        for geojson_data in &geojson_entries {
+            concatenated_content.push_str(geojson_data);
+            concatenated_content.push('\n'); // Add newline between entries
         }
 
         // Write concatenated content to temp file
@@ -134,32 +88,10 @@ impl TileGenerator {
         metrics_helper::record_geojson_concatenated_size(concatenated_content.len() as u64);
 
         info!(
-            "Successfully created temporary file with {} activities",
-            successful_files
+            "Successfully created temporary file with {} activities from archive",
+            geojson_entries.len()
         );
         Ok(())
-    }
-
-    async fn get_file_content(&self, key: &str) -> Result<String, Box<dyn std::error::Error>> {
-        match self
-            .s3_client
-            .get_object()
-            .bucket(&self.s3_bucket)
-            .key(key)
-            .send()
-            .await
-        {
-            Ok(response) => {
-                metrics_helper::increment_s3_upload_success();
-                let body = response.body.collect().await?;
-                let content = String::from_utf8(body.to_vec())?;
-                Ok(content)
-            }
-            Err(e) => {
-                metrics_helper::increment_s3_upload_failure();
-                Err(e.into())
-            }
-        }
     }
 
     #[time("tippecanoe_execution_duration")]
