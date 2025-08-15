@@ -2,6 +2,7 @@ use crate::activity_archive::ActivityArchiveManager;
 use crate::convert::convert_fit_to_geojson;
 use crate::intervals_client::{Activity, IntervalsClient};
 use crate::metrics_helper;
+use anyhow::Result;
 use aws_sdk_s3::Client as S3Client;
 use function_timer::time;
 use std::sync::{Arc, Mutex};
@@ -44,7 +45,7 @@ impl SyncJob {
     }
 
     #[time("sync_activities_duration")]
-    pub async fn sync_activities(&self) -> Result<(), Box<dyn std::error::Error>> {
+    pub async fn sync_activities(&self) -> Result<()> {
         info!(
             "Starting simplified archive-based sync to S3 bucket: {}, athlete: {}",
             self.s3_bucket, self.athlete_id
@@ -180,6 +181,7 @@ impl SyncJob {
         }
     }
 
+
     #[time("download_activity")]
     async fn download_activity(
         &self,
@@ -192,23 +194,12 @@ impl SyncJob {
             Ok(Some(fit_data)) => {
                 // Convert FIT to GeoJSON
                 match convert_fit_to_geojson(&fit_data, activity).await {
-                    Ok(Some(geojson_data)) => {
-                        // Add activity with GeoJSON data to thread archive
-                        if let Err(e) = thread_archive
-                            .add_new_activity(Some(geojson_data), activity)
-                            .await
-                        {
+                    Ok(geojson) => {
+                        if let Err(e) = thread_archive.add_new_activity(geojson.clone(), activity) {
                             error!("Failed to add activity {} to archive: {}", activity.id, e);
                             thread_stats.failed += 1;
-                        } else {
+                        } else if geojson.is_some() {
                             thread_stats.downloaded += 1;
-                        }
-                    }
-                    Ok(None) => {
-                        // No GPS data found in FIT file - add without GeoJSON
-                        if let Err(e) = thread_archive.add_new_activity(None, activity).await {
-                            error!("Failed to add activity {} to archive: {}", activity.id, e);
-                            thread_stats.failed += 1;
                         } else {
                             thread_stats.downloaded_empty += 1;
                         }
@@ -224,7 +215,7 @@ impl SyncJob {
             }
             Ok(None) => {
                 // HTTP 422 response - no GPS data available, add without GeoJSON
-                if let Err(e) = thread_archive.add_new_activity(None, activity).await {
+                if let Err(e) = thread_archive.add_new_activity(None, activity) {
                     error!("Failed to add activity {} to archive: {}", activity.id, e);
                     thread_stats.failed += 1;
                 } else {

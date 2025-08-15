@@ -1,5 +1,6 @@
 use crate::intervals_client::Activity;
 use crate::metrics_helper;
+use anyhow::Result;
 use aws_sdk_s3::Client as S3Client;
 use aws_sdk_s3::primitives::ByteStream;
 use function_timer::time;
@@ -65,7 +66,7 @@ impl ActivityArchiveManager {
         s3_client: &S3Client,
         s3_bucket: &str,
         athlete_id: &str,
-    ) -> Result<ActivityArchive, Box<dyn std::error::Error>> {
+    ) -> Result<ActivityArchive> {
         let archive_key = format!("athletes/{athlete_id}/activities.archive");
         
         Self::load_archive(s3_client, s3_bucket, &archive_key).await
@@ -76,7 +77,7 @@ impl ActivityArchiveManager {
         s3_client: &S3Client,
         s3_bucket: &str,
         archive_key: &str,
-    ) -> Result<ActivityArchive, Box<dyn std::error::Error>> {
+    ) -> Result<ActivityArchive> {
         match s3_client
             .get_object()
             .bucket(s3_bucket)
@@ -110,7 +111,7 @@ impl ActivityArchiveManager {
         &self,
         s3_client: &S3Client,
         s3_bucket: &str,
-    ) -> Result<(), Box<dyn std::error::Error>> {
+    ) -> Result<()> {
         info!(
             "Saving archive with {} activities",
             self.archive.entries.len()
@@ -181,11 +182,11 @@ impl ActivityArchiveManager {
     }
 
     /// Add a new or changed activity to the archive
-    pub async fn add_new_activity(
+    pub fn add_new_activity(
         &mut self,
         geojson: Option<String>,
         activity: &Activity,
-    ) -> Result<(), Box<dyn std::error::Error>> {
+    ) -> Result<()> {
         let activity_hash = Self::compute_activity_hash(activity);
 
         let entry = ActivityArchiveEntry {
@@ -203,7 +204,7 @@ impl ActivityArchiveManager {
         &mut self,
         s3_client: &S3Client,
         s3_bucket: &str,
-    ) -> Result<(), Box<dyn std::error::Error>> {
+    ) -> Result<()> {
         // Update timestamp only when finalizing
         self.archive.last_updated = chrono::Utc::now().to_rfc3339();
         self.save_archive(s3_client, s3_bucket).await

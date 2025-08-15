@@ -1,3 +1,4 @@
+use anyhow::Result;
 use fitparser::{FitDataRecord, Value as FitValue, profile::MesgNum};
 use geo::{Distance, Haversine, point};
 use geojson::{Feature, FeatureCollection, GeoJson, Geometry, Value};
@@ -88,7 +89,7 @@ fn split_coordinates_on_gaps(coords: Vec<Vec<f64>>, max_gap_meters: f64) -> Vec<
 pub async fn convert_fit_to_geojson(
     fit_data: &[u8],
     activity: &crate::intervals_client::Activity,
-) -> Result<Option<String>, Box<dyn std::error::Error>> {
+) -> Result<Option<String>> {
     // Parse FIT data
     let fit_data_records = fitparser::from_bytes(fit_data)?;
 

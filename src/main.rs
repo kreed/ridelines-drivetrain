@@ -91,8 +91,7 @@ pub(crate) async fn function_handler(event: LambdaEvent<EventBridgeEvent>) -> Re
     }
 
     // Generate PMTiles from synced GeoJSON files
-    let tile_generator =
-        TileGenerator::new(s3_client.clone(), s3_bucket.clone(), athlete_id.to_string());
+    let tile_generator = TileGenerator::new(s3_client, athlete_id.to_string());
 
     if let Err(e) = tile_generator.generate_pmtiles().await {
         tracing::error!("Failed to generate PMTiles: {}", e);

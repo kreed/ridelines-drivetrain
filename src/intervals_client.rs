@@ -1,4 +1,5 @@
 use crate::metrics_helper;
+use anyhow::Result;
 use base64::prelude::*;
 use reqwest::StatusCode;
 use reqwest_middleware::{ClientBuilder, ClientWithMiddleware};
@@ -54,7 +55,7 @@ impl IntervalsClient {
     pub async fn fetch_activities(
         &self,
         athlete_id: &str,
-    ) -> Result<Vec<Activity>, Box<dyn std::error::Error>> {
+    ) -> Result<Vec<Activity>> {
         let path = format!("{ENDPOINT}/api/v1/athlete/{athlete_id}/activities.csv");
         
         match self

@@ -1,5 +1,6 @@
 use crate::activity_archive::ActivityArchiveManager;
 use crate::metrics_helper;
+use anyhow::{Context, Result};
 use aws_sdk_s3::Client as S3Client;
 use aws_sdk_s3::primitives::ByteStream;
 use function_timer::time;
@@ -7,23 +8,23 @@ use std::process::Command;
 use tokio::fs;
 use tracing::{error, info};
 
+const WEBSITE_S3_BUCKET: &str = "kreed.org-website";
+
 pub struct TileGenerator {
     s3_client: S3Client,
-    s3_bucket: String,
     athlete_id: String,
 }
 
 impl TileGenerator {
-    pub fn new(s3_client: S3Client, s3_bucket: String, athlete_id: String) -> Self {
+    pub fn new(s3_client: S3Client, athlete_id: String) -> Self {
         Self {
             s3_client,
-            s3_bucket,
             athlete_id,
         }
     }
 
     #[time("generate_pmtiles_duration")]
-    pub async fn generate_pmtiles(&self) -> Result<(), Box<dyn std::error::Error>> {
+    pub async fn generate_pmtiles(&self) -> Result<()> {
         info!(
             "Starting PMTiles generation for athlete {}",
             self.athlete_id
@@ -54,11 +55,12 @@ impl TileGenerator {
     async fn prepare_geojson_data(
         &self,
         temp_data_file: &str,
-    ) -> Result<(), Box<dyn std::error::Error>> {
+    ) -> Result<()> {
         // Load the existing activity archive
+        let data_bucket = std::env::var("S3_BUCKET").context("S3_BUCKET environment variable not set")?;
         let existing_archive = ActivityArchiveManager::load_existing(
             &self.s3_client,
-            &self.s3_bucket,
+            &data_bucket,
             &self.athlete_id,
         )
         .await?;
@@ -67,7 +69,7 @@ impl TileGenerator {
         let geojson_entries = existing_archive.extract_geojson_data();
 
         if geojson_entries.is_empty() {
-            return Err("No GeoJSON data found in archive".into());
+            return Err(anyhow::anyhow!("No GeoJSON data found in archive"));
         }
 
         info!("Found {} GeoJSON entries in archive", geojson_entries.len());
@@ -82,7 +84,7 @@ impl TileGenerator {
         // Write concatenated content to temp file
         fs::write(temp_data_file, &concatenated_content)
             .await
-            .map_err(|e| format!("Failed to write temporary data file: {e}"))?;
+            .context("Failed to write temporary data file")?;
 
         // Record concatenated file size
         metrics_helper::record_geojson_concatenated_size(concatenated_content.len() as u64);
@@ -99,7 +101,7 @@ impl TileGenerator {
         &self,
         input_file: &str,
         output_file: &str,
-    ) -> Result<(), Box<dyn std::error::Error>> {
+    ) -> Result<()> {
         info!("Running tippecanoe: {} -> {}", input_file, output_file);
 
         let output = Command::new("/opt/bin/tippecanoe")
@@ -112,7 +114,7 @@ impl TileGenerator {
                 input_file,
             ])
             .output()
-            .map_err(|e| format!("Failed to execute tippecanoe: {e}"))?;
+            .context("Failed to execute tippecanoe")?;
 
         if !output.status.success() {
             let stderr = String::from_utf8_lossy(&output.stderr);
@@ -121,7 +123,7 @@ impl TileGenerator {
             error!("Stderr: {}", stderr);
             error!("Stdout: {}", stdout);
             metrics_helper::increment_tippecanoe_failure();
-            return Err(format!("Tippecanoe failed: {stderr}").into());
+            return Err(anyhow::anyhow!("Tippecanoe failed: {stderr}"));
         }
 
         let stdout = String::from_utf8_lossy(&output.stdout);
@@ -134,13 +136,13 @@ impl TileGenerator {
     }
 
     #[time("pmtiles_upload_duration")]
-    async fn upload_pmtiles(&self, pmtiles_file: &str) -> Result<(), Box<dyn std::error::Error>> {
+    async fn upload_pmtiles(&self, pmtiles_file: &str) -> Result<()> {
         info!("Uploading PMTiles file to S3: {}", pmtiles_file);
 
         // Read the PMTiles file
         let file_content = fs::read(pmtiles_file)
             .await
-            .map_err(|e| format!("Failed to read PMTiles file: {e}"))?;
+            .context("Failed to read PMTiles file")?;
 
         // Record PMTiles file size
         metrics_helper::record_pmtiles_file_size(file_content.len() as u64);
@@ -151,7 +153,7 @@ impl TileGenerator {
         match self
             .s3_client
             .put_object()
-            .bucket("kreed.org-website")
+            .bucket(WEBSITE_S3_BUCKET)
             .key(&s3_key)
             .body(ByteStream::from(file_content))
             .content_type("application/vnd.pmtiles")
@@ -165,7 +167,7 @@ impl TileGenerator {
             }
             Err(e) => {
                 metrics_helper::increment_s3_upload_failure();
-                Err(format!("Failed to upload PMTiles to S3: {e}").into())
+                Err(anyhow::anyhow!("Failed to upload PMTiles to S3: {e}"))
             }
         }
     }
