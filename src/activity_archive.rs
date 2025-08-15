@@ -169,13 +169,12 @@ impl ActivityArchiveManager {
         let activity_hash = Self::compute_activity_hash(activity);
 
         // Check if activity exists with same hash in existing archive
-        if let Some(existing_entry) = existing_archive.entries.get(&activity.id) {
-            if existing_entry.activity_hash == activity_hash {
-                // Zero-copy transfer: remove from old archive and insert into new
-                if let Some(entry) = existing_archive.entries.remove(&activity.id) {
-                    self.archive.entries.insert(activity.id.clone(), entry);
-                    return true;
-                }
+        if let Some(existing_entry) = existing_archive.entries.get(&activity.id) 
+            && existing_entry.activity_hash == activity_hash {
+            // Zero-copy transfer: remove from old archive and insert into new
+            if let Some(entry) = existing_archive.entries.remove(&activity.id) {
+                self.archive.entries.insert(activity.id.clone(), entry);
+                return true;
             }
         }
         false
