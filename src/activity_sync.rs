@@ -26,29 +26,29 @@ impl SyncJob {
     }
 
     #[time("sync_activities_duration")]
-    pub async fn sync_activities(&self) -> Result<()> {
+    pub async fn sync_activities(&self) -> Result<String> {
         info!(
-            "Starting simplified archive-based sync to S3 bucket: {}, athlete: {}",
+            "Starting memory-efficient archive-based sync to S3 bucket: {}, athlete: {}",
             self.s3_bucket, self.athlete_id
         );
 
-        // Load existing archive (or create empty if none exists)
-        let mut existing_archive = match ActivityArchiveManager::load_existing(
+        // Phase 1: Load existing index (metadata only, not full archive)
+        let existing_index = match ActivityArchiveManager::load_existing_index(
             &self.s3_client,
             &self.s3_bucket,
             &self.athlete_id,
         )
         .await
         {
-            Ok(archive) => Some(archive),
+            Ok(index) => Some(index),
             Err(_) => {
-                info!("No existing archive found, starting fresh");
+                info!("No existing index found, starting fresh");
                 None
             }
         };
 
-        // Create new empty archive for this sync
-        let mut new_archive = ActivityArchiveManager::new_empty(self.athlete_id.clone());
+        // Create new archive manager for finalization
+        let new_archive = ActivityArchiveManager::new_empty(self.athlete_id.clone());
 
         let activities = self
             .intervals_client
@@ -56,7 +56,7 @@ impl SyncJob {
             .await?;
         if activities.is_empty() {
             info!("No activities found for athlete {}", self.athlete_id);
-            return Ok(());
+            return Ok(String::new());
         }
 
         info!(
@@ -65,12 +65,14 @@ impl SyncJob {
             self.athlete_id
         );
 
-        // Phase 1: Transfer unchanged activities and collect new/changed for parallel processing
-        let changed_activities = if let Some(ref mut existing) = existing_archive {
+        // Phase 2: Identify unchanged vs new/changed activities
+        let (unchanged_activity_ids, changed_activities) = if let Some(ref existing) = existing_index {
+            let mut unchanged_ids = Vec::new();
             let mut changed = Vec::new();
 
             for activity in &activities {
-                if new_archive.transfer_unchanged_entry(existing, activity) {
+                if ActivityArchiveManager::is_activity_unchanged(existing, activity) {
+                    unchanged_ids.push(activity.id.clone());
                     metrics_helper::increment_activities_skipped_unchanged(1);
                 } else {
                     // Activity is new or changed, add to parallel processing queue
@@ -79,93 +81,131 @@ impl SyncJob {
             }
 
             info!(
-                "Transferred {} unchanged, queued {} for parallel processing",
-                activities.len() - changed.len(),
+                "Keeping {} unchanged activities, queued {} for parallel processing",
+                unchanged_ids.len(),
                 changed.len()
             );
 
-            changed
+            (unchanged_ids, changed)
         } else {
-            // No existing archive, all activities need processing
+            // No existing index, all activities need processing
             info!(
-                "No existing archive, processing all {} activities",
+                "No existing index, processing all {} activities",
                 activities.len()
             );
-            activities
+            (Vec::new(), activities)
         };
 
-        // Phase 2: Process new/changed activities in parallel
+        // Phase 3: Create temp directory and process new/changed activities in parallel
+        let temp_dir = format!("/tmp/sync_{}", self.athlete_id);
+        std::fs::create_dir_all(&temp_dir)?;
+        
         if !changed_activities.is_empty() {
-            let thread_results = stream::iter(changed_activities)
-                .map(|activity| self.download_activity(activity))
+            let results = stream::iter(changed_activities)
+                .map(|activity| self.process_activity(activity, &temp_dir))
                 .buffer_unordered(5)
                 .collect::<Vec<_>>()
                 .await;
 
-            // Phase 3: Merge all thread archives
-            for thread_archive in thread_results {
-                new_archive.extend(thread_archive);
+            // Check for any failures
+            for result in results {
+                if let Err(e) = result {
+                    error!("Activity download failed: {}", e);
+                }
             }
         }
 
-        // Save the final merged archive
-        new_archive
-            .finalize(&self.s3_client, &self.s3_bucket)
+        // Phase 4: Finalize archive by streaming existing + new activities from temp dir
+        let geojson_file_path = new_archive
+            .finalize_archive(&unchanged_activity_ids, &temp_dir, &self.s3_client, &self.s3_bucket)
             .await?;
 
-        Ok(())
+        Ok(geojson_file_path)
     }
 
-    #[time("download_activity")]
-    async fn download_activity(&self, activity: Activity) -> ActivityArchiveManager {
-        // Create thread-local archive
-        let mut thread_archive = ActivityArchiveManager::new_empty(self.athlete_id.clone());
+    #[time("download_and_convert_activity")]
+    async fn download_and_convert_activity(&self, activity: &Activity) -> Result<Option<String>> {
+        info!(
+            "Downloading and converting activity: {} (ID: {})",
+            activity.name, activity.id
+        );
+        
+        // Download with retry logic handled by middleware
+        match self.intervals_client.download_fit(&activity.id).await {
+            Ok(Some(fit_data)) => {
+                info!(
+                    "Converting FIT data for activity: {} (ID: {})",
+                    activity.name, activity.id
+                );
+                
+                // Convert FIT to GeoJSON
+                convert_fit_to_geojson(&fit_data, activity).await
+            }
+            Ok(None) => {
+                // HTTP 422 response - no GPS data available
+                Ok(None)
+            }
+            Err(e) => {
+                error!("Failed to download activity {}: {}", activity.id, e);
+                Err(e.into())
+            }
+        }
+    }
 
+    #[time("process_activity")]
+    async fn process_activity(&self, activity: Activity, temp_dir: &str) -> Result<()> {
         info!(
             "Processing activity: {} (ID: {})",
             activity.name, activity.id
         );
-        // Download with retry logic handled by middleware
-        match self.intervals_client.download_fit(&activity.id).await {
-            Ok(Some(fit_data)) => {
-                // Convert FIT to GeoJSON
-                match convert_fit_to_geojson(&fit_data, &activity).await {
-                    Ok(geojson) => {
-                        if let Err(e) = thread_archive.add_new_activity(geojson.clone(), &activity)
-                        {
-                            error!("Failed to add activity {} to archive: {}", activity.id, e);
-                            metrics_helper::increment_activities_failed(1);
-                        } else if geojson.is_some() {
-                            metrics_helper::increment_activities_with_gps(1);
-                            metrics_helper::increment_activities_downloaded_new(1);
-                        } else {
-                            metrics_helper::increment_activities_without_gps(1);
-                        }
+        
+        // Compute activity hash once
+        let activity_hash = activity.compute_hash();
+        
+        // Download and convert activity
+        match self.download_and_convert_activity(&activity).await {
+            Ok(Some(geojson)) => {
+                info!(
+                    "Writing GeoJSON for activity: {} (ID: {})",
+                    activity.name, activity.id
+                );
+
+                // Write GeoJSON directly to temp file with hash in filename
+                let temp_file_path = format!("{}/activity_{}_{}.geojson", temp_dir, activity.id, activity_hash);
+                match std::fs::write(&temp_file_path, &geojson) {
+                    Ok(_) => {
+                        metrics_helper::increment_activities_with_gps(1);
+                        metrics_helper::increment_activities_downloaded_new(1);
+                        info!("Saved GeoJSON to: {}", temp_file_path);
                     }
                     Err(e) => {
-                        error!(
-                            "Failed to convert FIT to GeoJSON for activity {}: {}",
-                            activity.id, e
-                        );
+                        error!("Failed to write activity {} to temp file: {}", activity.id, e);
                         metrics_helper::increment_activities_failed(1);
                     }
                 }
             }
             Ok(None) => {
-                // HTTP 422 response - no GPS data available, add without GeoJSON
-                if let Err(e) = thread_archive.add_new_activity(None, &activity) {
-                    error!("Failed to add activity {} to archive: {}", activity.id, e);
-                    metrics_helper::increment_activities_failed(1);
-                } else {
-                    metrics_helper::increment_activities_without_gps(1);
+                // No GPS data, create empty stub file with hash in filename
+                let stub_file_path = format!("{}/activity_{}_{}.stub", temp_dir, activity.id, activity_hash);
+                
+                match std::fs::write(&stub_file_path, "") {
+                    Ok(_) => {
+                        metrics_helper::increment_activities_without_gps(1);
+                        info!("Saved empty stub to: {}", stub_file_path);
+                    }
+                    Err(e) => {
+                        error!("Failed to write stub for activity {}: {}", activity.id, e);
+                        metrics_helper::increment_activities_failed(1);
+                    }
                 }
             }
             Err(e) => {
-                error!("Failed to download activity {}: {}", activity.id, e);
+                error!("Failed to download/convert activity {}: {}", activity.id, e);
                 metrics_helper::increment_activities_failed(1);
             }
         }
 
-        thread_archive
+        info!("Finished activity {}", activity.id);
+        Ok(())
     }
 }

@@ -5,6 +5,7 @@ use reqwest::StatusCode;
 use reqwest_middleware::{ClientBuilder, ClientWithMiddleware};
 use reqwest_retry::{RetryTransientMiddleware, policies::ExponentialBackoff};
 use serde::Deserialize;
+use std::hash::{Hash, Hasher};
 
 const ENDPOINT: &str = "https://intervals.icu";
 
@@ -34,6 +35,28 @@ pub struct Activity {
     #[serde(rename = "type")]
     pub activity_type: String,
     pub elapsed_time: i64,
+}
+
+impl Hash for Activity {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        self.id.hash(state);
+        self.name.hash(state);
+        self.start_date_local.hash(state);
+        self.elapsed_time.hash(state);
+        if let Some(distance) = self.distance {
+            distance.to_bits().hash(state);
+        }
+    }
+}
+
+impl Activity {
+    pub fn compute_hash(&self) -> String {
+        use std::collections::hash_map::DefaultHasher;
+        
+        let mut hasher = DefaultHasher::new();
+        self.hash(&mut hasher);
+        format!("{:x}", hasher.finish())
+    }
 }
 
 pub struct IntervalsClient {

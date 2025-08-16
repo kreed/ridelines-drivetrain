@@ -82,18 +82,26 @@ pub(crate) async fn function_handler(event: LambdaEvent<EventBridgeEvent>) -> Re
         .secret_string()
         .ok_or_else(|| Error::from("Secret string not found"))?;
 
-    // Sync activities directly to S3
+    // Sync activities and get path to concatenated GeoJSON file
     let sync_job = SyncJob::new(api_key, athlete_id, s3_client.clone(), &s3_bucket);
 
-    if let Err(e) = sync_job.sync_activities().await {
-        metrics_helper::increment_lambda_failure();
-        return Err(Error::from(format!("Sync failed: {e}")));
-    }
+    let geojson_file_path = match sync_job.sync_activities().await {
+        Ok(path) => path,
+        Err(e) => {
+            metrics_helper::increment_lambda_failure();
+            return Err(Error::from(format!("Sync failed: {e}")));
+        }
+    };
 
-    // Generate PMTiles from synced GeoJSON files
+    // Generate PMTiles from the concatenated GeoJSON file
     let tile_generator = TileGenerator::new(s3_client, athlete_id.to_string());
 
-    if let Err(e) = tile_generator.generate_pmtiles().await {
+    let tile_result = tile_generator.generate_pmtiles_from_file(&geojson_file_path).await;
+    
+    // Clean up the GeoJSON file regardless of tile generation success/failure
+    let _ = std::fs::remove_file(&geojson_file_path);
+    
+    if let Err(e) = tile_result {
         tracing::error!("Failed to generate PMTiles: {}", e);
         metrics_helper::increment_lambda_failure();
         return Err(Error::from(format!("PMTiles generation failed: {e}")));
