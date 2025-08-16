@@ -1,4 +1,4 @@
-use super::ActivitySync;
+use super::{ActivitySync, ActivityIndex};
 use crate::convert::convert_fit_to_geojson;
 use crate::intervals_client::Activity;
 use crate::metrics_helper;
@@ -34,15 +34,14 @@ impl ActivitySync {
             self.athlete_id
         );
 
-        // Phase 2: Identify unchanged vs new/changed activities
-        let (unchanged_activity_ids, changed_activities) =
+        // Phase 2: Identify unchanged vs new/changed activities and create copied index
+        let (copied_index, changed_activities) =
             if let Some(ref existing) = existing_index {
-                let mut unchanged_ids = Vec::new();
+                let mut copied = ActivityIndex::new_empty(self.athlete_id.clone());
                 let mut changed = Vec::new();
 
                 for activity in &activities {
-                    if Self::is_activity_unchanged(existing, activity) {
-                        unchanged_ids.push(activity.id.clone());
+                    if existing.try_copy(activity, &mut copied) {
                         metrics_helper::increment_activities_skipped_unchanged(1);
                     } else {
                         // Activity is new or changed, add to parallel processing queue
@@ -51,19 +50,20 @@ impl ActivitySync {
                 }
 
                 info!(
-                    "Keeping {} unchanged activities, queued {} for parallel processing",
-                    unchanged_ids.len(),
+                    "Keeping {} unchanged activities, queued {} for download.",
+                    copied.total_activities(),
                     changed.len()
                 );
 
-                (unchanged_ids, changed)
+                (copied, changed)
             } else {
                 // No existing index, all activities need processing
                 info!(
                     "No existing index, processing all {} activities",
                     activities.len()
                 );
-                (Vec::new(), activities)
+                let empty_index = ActivityIndex::new_empty(self.athlete_id.clone());
+                (empty_index, activities)
             };
 
         // Phase 3: Create temp directory and process new/changed activities in parallel
@@ -80,7 +80,7 @@ impl ActivitySync {
 
         // Phase 4: Finalize archive by streaming existing + new activities from temp dir
         let geojson_file_path = self
-            .finalize_archive(&unchanged_activity_ids, &changed_activities_dir)
+            .finalize_archive(&changed_activities_dir, copied_index)
             .await?;
 
         Ok(geojson_file_path)
