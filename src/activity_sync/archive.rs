@@ -255,7 +255,7 @@ impl ActivitySync {
         drop(geojson_writer);
 
         // Compress and upload GeoJSON file
-        self.upload_compressed_geojson(&temp_geojson_path).await?;
+        self.upload_compressed_geojson(&temp_geojson_path.to_string_lossy()).await?;
 
         // Save index
         self.upload_index(&copied_index).await?;
