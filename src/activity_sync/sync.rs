@@ -9,7 +9,7 @@ use tracing::{error, info};
 
 impl ActivitySync {
     #[time("sync_activities_duration")]
-    pub async fn sync_activities(&self) -> Result<String> {
+    pub async fn sync_activities(&self) -> Result<std::path::PathBuf> {
         // Phase 1: Load existing index (metadata only, not full archive)
         let existing_index = match self.download_index().await {
             Ok(index) => Some(index),
@@ -25,7 +25,7 @@ impl ActivitySync {
             .await?;
         if activities.is_empty() {
             info!("No activities found for athlete {}", self.athlete_id);
-            return Ok(String::new());
+            return Ok(std::path::PathBuf::new());
         }
 
         info!(
@@ -66,8 +66,8 @@ impl ActivitySync {
                 (empty_index, activities)
             };
 
-        // Phase 3: Create temp directory and process new/changed activities in parallel
-        let changed_activities_dir = format!("/tmp/sync_{}", self.athlete_id);
+        // Phase 3: Create subdirectory for changed activities and process them in parallel
+        let changed_activities_dir = self.work_dir.join("activities");
         std::fs::create_dir_all(&changed_activities_dir)?;
 
         if !changed_activities.is_empty() {
@@ -97,7 +97,7 @@ impl ActivitySync {
         }
     }
 
-    async fn process_activity(&self, activity: Activity, temp_dir: &str) -> Result<()> {
+    async fn process_activity(&self, activity: Activity, temp_dir: &std::path::Path) -> Result<()> {
         info!(
             "Processing activity: {} (ID: {})",
             activity.name, activity.id
@@ -115,15 +115,15 @@ impl ActivitySync {
                 );
 
                 // Write GeoJSON directly to temp file with hash in filename
-                let temp_file_path = format!(
-                    "{}/activity_{}_{}.geojson",
-                    temp_dir, activity.id, activity_hash
-                );
+                let temp_file_path = temp_dir.join(format!(
+                    "activity_{}_{}.geojson",
+                    activity.id, activity_hash
+                ));
                 match std::fs::write(&temp_file_path, &geojson) {
                     Ok(_) => {
                         metrics_helper::increment_activities_with_gps(1);
                         metrics_helper::increment_activities_downloaded_new(1);
-                        info!("Saved GeoJSON to: {}", temp_file_path);
+                        info!("Saved GeoJSON to: {}", temp_file_path.display());
                     }
                     Err(e) => {
                         error!(
@@ -136,15 +136,15 @@ impl ActivitySync {
             }
             Ok(None) => {
                 // No GPS data, create empty stub file with hash in filename
-                let stub_file_path = format!(
-                    "{}/activity_{}_{}.stub",
-                    temp_dir, activity.id, activity_hash
-                );
+                let stub_file_path = temp_dir.join(format!(
+                    "activity_{}_{}.stub",
+                    activity.id, activity_hash
+                ));
 
                 match std::fs::write(&stub_file_path, "") {
                     Ok(_) => {
                         metrics_helper::increment_activities_without_gps(1);
-                        info!("Saved empty stub to: {}", stub_file_path);
+                        info!("Saved empty stub to: {}", stub_file_path.display());
                     }
                     Err(e) => {
                         error!("Failed to write stub for activity {}: {}", activity.id, e);

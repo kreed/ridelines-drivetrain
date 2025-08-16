@@ -143,6 +143,10 @@ pub async fn convert_fit_to_geojson(
         "id".to_string(),
         serde_json::Value::String(activity.id.clone()),
     );
+    properties.insert(
+        "activity_hash".to_string(),
+        serde_json::Value::String(activity.compute_hash()),
+    );
 
     let feature = Feature {
         bbox: None,

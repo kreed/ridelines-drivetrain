@@ -8,6 +8,7 @@ use aws_sdk_s3::Client as S3Client;
 use aws_sdk_secretsmanager::Client as SecretsManagerClient;
 use function_timer::time;
 use std::env;
+use tempdir::TempDir;
 
 mod activity_sync;
 mod convert;
@@ -81,8 +82,12 @@ pub(crate) async fn function_handler(event: LambdaEvent<EventBridgeEvent>) -> Re
         .secret_string()
         .ok_or_else(|| Error::from("Secret string not found"))?;
 
+    // Create shared work directory for all temporary files
+    let work_dir = TempDir::new(&format!("intervals_mapper_{athlete_id}"))
+        .map_err(|e| Error::from(format!("Failed to create work directory: {e}")))?;
+
     // Sync activities and get path to concatenated GeoJSON file
-    let sync_job = ActivitySync::new(api_key, athlete_id, s3_client.clone(), &s3_bucket);
+    let sync_job = ActivitySync::new(api_key, athlete_id, s3_client.clone(), &s3_bucket, work_dir.path());
 
     let geojson_file_path = match sync_job.sync_activities().await {
         Ok(path) => path,
@@ -96,7 +101,7 @@ pub(crate) async fn function_handler(event: LambdaEvent<EventBridgeEvent>) -> Re
     let tile_generator = TileGenerator::new(s3_client, athlete_id.to_string());
 
     let tile_result = tile_generator
-        .generate_pmtiles_from_file(&geojson_file_path)
+        .generate_pmtiles_from_file(&geojson_file_path.to_string_lossy())
         .await;
 
     // Clean up the GeoJSON file regardless of tile generation success/failure

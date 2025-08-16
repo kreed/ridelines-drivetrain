@@ -67,3 +67,7 @@ pub fn record_archive_compression_ratio(ratio: f64) {
 pub fn record_archive_size_bytes(size_bytes: u64) {
     gauge!("archive_size_bytes").set(size_bytes as f64);
 }
+
+pub fn record_index_size_bytes(size_bytes: u64) {
+    gauge!("index_size_bytes").set(size_bytes as f64);
+}

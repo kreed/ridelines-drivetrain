@@ -58,7 +58,7 @@ impl ActivityIndex {
     }
 
     pub fn create_key(activity_id: &str, activity_hash: &str) -> String {
-        format!("{}:{}", activity_id, activity_hash)
+        format!("{activity_id}:{activity_hash}")
     }
 }
 
@@ -104,6 +104,9 @@ impl ActivitySync {
 
         // Serialize
         let serialized_data = bincode::serialize(index)?;
+        
+        // Record index size metrics
+        metrics_helper::record_index_size_bytes(serialized_data.len() as u64);
 
         // Upload to S3
         let index_key = format!("athletes/{}/activities.index", index.athlete_id);
@@ -157,14 +160,14 @@ impl ActivitySync {
     #[time("finalize_archive_duration")]
     pub async fn finalize_archive(
         &self,
-        temp_dir_path: &str,
+        temp_dir_path: &std::path::Path,
         mut copied_index: ActivityIndex,
-    ) -> Result<String> {
+    ) -> Result<std::path::PathBuf> {
         // Update timestamp on copied index
         copied_index.last_updated = chrono::Utc::now().to_rfc3339();
 
-        // Create temporary file for new GeoJSON content
-        let temp_geojson_path = format!("/tmp/activities_{}.geojson", self.athlete_id);
+        // Create temporary file for new GeoJSON content in work directory
+        let temp_geojson_path = self.work_dir.join(format!("activities_{}.geojson", self.athlete_id));
         let temp_geojson_file = File::create(&temp_geojson_path)?;
         let mut geojson_writer = std::io::BufWriter::new(temp_geojson_file);
 
@@ -240,11 +243,9 @@ impl ActivitySync {
             }
         }
 
-        let total_activities = copied_index.total_activities();
-        
         info!(
             "Finalizing archive with {} total activities ({} geojson, {} empty), {} new activities processed",
-            total_activities,
+            copied_index.total_activities(),
             copied_index.geojson_activities.len(),
             copied_index.empty_activities.len(),
             new_activities,
