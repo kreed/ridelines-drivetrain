@@ -109,11 +109,6 @@ impl ActivitySync {
         // Download and convert activity
         match self.download_and_convert_activity(&activity).await {
             Ok(Some(geojson)) => {
-                info!(
-                    "Writing GeoJSON for activity: {} (ID: {})",
-                    activity.name, activity.id
-                );
-
                 // Write GeoJSON directly to temp file with hash in filename
                 let temp_file_path = temp_dir.join(format!(
                     "activity_{}_{}.geojson",

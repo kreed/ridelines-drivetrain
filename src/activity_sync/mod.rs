@@ -2,9 +2,10 @@ use crate::intervals_client::IntervalsClient;
 use aws_sdk_s3::Client as S3Client;
 
 mod archive;
+mod index;
 mod sync;
 
-pub use archive::ActivityIndex;
+pub use index::ActivityIndex;
 
 pub struct ActivitySync {
     intervals_client: IntervalsClient,
