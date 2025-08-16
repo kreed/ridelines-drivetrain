@@ -45,7 +45,6 @@ impl TileGenerator {
         Ok(())
     }
 
-
     #[time("tippecanoe_execution_duration")]
     async fn run_tippecanoe(&self, input_file: &str, output_file: &str) -> Result<()> {
         info!("Running tippecanoe: {} -> {}", input_file, output_file);

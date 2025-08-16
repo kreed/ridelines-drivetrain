@@ -52,7 +52,7 @@ impl Hash for Activity {
 impl Activity {
     pub fn compute_hash(&self) -> String {
         use std::collections::hash_map::DefaultHasher;
-        
+
         let mut hasher = DefaultHasher::new();
         self.hash(&mut hasher);
         format!("{:x}", hasher.finish())

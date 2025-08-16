@@ -59,7 +59,6 @@ pub fn record_pmtiles_file_size(size_bytes: u64) {
     gauge!("pmtiles_file_size_bytes").set(size_bytes as f64);
 }
 
-
 /// Archive-specific Metrics
 pub fn record_archive_compression_ratio(ratio: f64) {
     gauge!("archive_compression_ratio").set(ratio);

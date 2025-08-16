@@ -9,14 +9,13 @@ use aws_sdk_secretsmanager::Client as SecretsManagerClient;
 use function_timer::time;
 use std::env;
 
-mod activity_archive;
 mod activity_sync;
 mod convert;
 mod intervals_client;
 mod metrics_helper;
 mod tile_generator;
 
-use crate::activity_sync::SyncJob;
+use crate::activity_sync::ActivitySync;
 use crate::tile_generator::TileGenerator;
 
 #[tokio::main]
@@ -83,7 +82,7 @@ pub(crate) async fn function_handler(event: LambdaEvent<EventBridgeEvent>) -> Re
         .ok_or_else(|| Error::from("Secret string not found"))?;
 
     // Sync activities and get path to concatenated GeoJSON file
-    let sync_job = SyncJob::new(api_key, athlete_id, s3_client.clone(), &s3_bucket);
+    let sync_job = ActivitySync::new(api_key, athlete_id, s3_client.clone(), &s3_bucket);
 
     let geojson_file_path = match sync_job.sync_activities().await {
         Ok(path) => path,
@@ -96,11 +95,13 @@ pub(crate) async fn function_handler(event: LambdaEvent<EventBridgeEvent>) -> Re
     // Generate PMTiles from the concatenated GeoJSON file
     let tile_generator = TileGenerator::new(s3_client, athlete_id.to_string());
 
-    let tile_result = tile_generator.generate_pmtiles_from_file(&geojson_file_path).await;
-    
+    let tile_result = tile_generator
+        .generate_pmtiles_from_file(&geojson_file_path)
+        .await;
+
     // Clean up the GeoJSON file regardless of tile generation success/failure
     let _ = std::fs::remove_file(&geojson_file_path);
-    
+
     if let Err(e) = tile_result {
         tracing::error!("Failed to generate PMTiles: {}", e);
         metrics_helper::increment_lambda_failure();
