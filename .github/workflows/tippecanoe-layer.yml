@@ -58,6 +58,7 @@ jobs:
         
         # Copy binaries and dependencies
         RUN mkdir -p /layer/bin /layer/lib
+        RUN cp tippecanoe /layer/bin/
         RUN ldd /layer/bin/tippecanoe | grep "=> /" | awk '{print $3}' | xargs -I '{}' cp '{}' /layer/lib/ || true
         
         # Make binaries executable
