@@ -96,7 +96,13 @@ pub(crate) async fn function_handler(event: LambdaEvent<EventBridgeEvent>) -> Re
     );
 
     let geojson_file_path = match sync_job.sync_activities().await {
-        Ok(path) => path,
+        Ok(Some(path)) => path,
+        Ok(None) => {
+            // No changes detected, skip tile generation
+            tracing::info!("No activity changes detected, Lambda execution completed successfully");
+            metrics_helper::increment_lambda_success();
+            return Ok(());
+        }
         Err(e) => {
             metrics_helper::increment_lambda_failure();
             return Err(Error::from(format!("Sync failed: {e}")));

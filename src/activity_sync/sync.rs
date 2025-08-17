@@ -9,7 +9,7 @@ use tracing::{error, info};
 
 impl ActivitySync {
     #[time("sync_activities_duration")]
-    pub async fn sync_activities(&self) -> Result<std::path::PathBuf> {
+    pub async fn sync_activities(&self) -> Result<Option<std::path::PathBuf>> {
         // Phase 1: Load existing index (metadata only, not full archive)
         let existing_index = match self.download_index().await {
             Ok(index) => Some(index),
@@ -25,7 +25,7 @@ impl ActivitySync {
             .await?;
         if activities.is_empty() {
             info!("No activities found for athlete {}", self.athlete_id);
-            return Ok(std::path::PathBuf::new());
+            return Ok(None);
         }
 
         info!(
@@ -35,7 +35,7 @@ impl ActivitySync {
         );
 
         // Phase 2: Identify unchanged vs new/changed activities and create copied index
-        let (copied_index, changed_activities) = if let Some(ref existing) = existing_index {
+        let (copied_index, changed_activities, has_changes) = if let Some(ref existing) = existing_index {
             let mut copied = ActivityIndex::new_empty(self.athlete_id.clone());
             let mut changed = Vec::new();
 
@@ -48,13 +48,24 @@ impl ActivitySync {
                 }
             }
 
+            // Check if activities were deleted (existed before but not in current list)
+            let activities_deleted = existing.total_activities() > copied.total_activities();
+            let has_changes = !changed.is_empty() || activities_deleted;
+
+            if activities_deleted {
+                info!(
+                    "Detected {} deleted activities",
+                    existing.total_activities() - copied.total_activities()
+                );
+            }
+
             info!(
                 "Keeping {} unchanged activities, queued {} for download.",
                 copied.total_activities(),
                 changed.len()
             );
 
-            (copied, changed)
+            (copied, changed, has_changes)
         } else {
             // No existing index, all activities need processing
             info!(
@@ -62,8 +73,14 @@ impl ActivitySync {
                 activities.len()
             );
             let empty_index = ActivityIndex::new_empty(self.athlete_id.clone());
-            (empty_index, activities)
+            (empty_index, activities, true)  // Always has changes when starting fresh
         };
+
+        // Short circuit: if no changes detected, skip archive upload and tile generation
+        if !has_changes {
+            info!("No activity changes detected, skipping archive upload and tile generation");
+            return Ok(None);
+        }
 
         // Phase 3: Create subdirectory for changed activities and process them in parallel
         let changed_activities_dir = self.work_dir.join("activities");
@@ -82,7 +99,7 @@ impl ActivitySync {
             .finalize_archive(&changed_activities_dir, copied_index)
             .await?;
 
-        Ok(geojson_file_path)
+        Ok(Some(geojson_file_path))
     }
 
     async fn download_and_convert_activity(&self, activity: &Activity) -> Result<Option<String>> {
