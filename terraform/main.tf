@@ -90,65 +90,6 @@ resource "aws_iam_role" "github_actions" {
   }
 }
 
-# IAM policy for Lambda deployment
-resource "aws_iam_policy" "lambda_deployment" {
-  name        = "${var.project_name}-lambda-deployment"
-  description = "Policy for GitHub Actions to deploy Lambda function"
-
-  policy = jsonencode({
-    Version = "2012-10-17"
-    Statement = [
-      {
-        Effect = "Allow"
-        Action = [
-          "lambda:UpdateFunctionCode",
-          "lambda:UpdateFunctionConfiguration",
-          "lambda:GetFunction",
-          "lambda:CreateFunction",
-          "lambda:DeleteFunction",
-          "lambda:AddPermission",
-          "lambda:RemovePermission",
-          "lambda:InvokeFunction"
-        ]
-        Resource = "arn:aws:lambda:${var.aws_region}:*:function:${var.project_name}"
-      },
-      {
-        Effect = "Allow"
-        Action = [
-          "lambda:PublishLayerVersion",
-          "lambda:GetLayerVersion"
-        ]
-        Resource = "arn:aws:lambda:${var.aws_region}:*:layer:${var.project_name}-*"
-      },
-      {
-        Effect = "Allow"
-        Action = [
-          "lambda:ListLayers",
-          "lambda:GetLayerVersion"
-        ]
-        Resource = "*"
-      },
-      {
-        Effect = "Allow"
-        Action = [
-          "s3:GetObject",
-          "s3:PutObject",
-          "s3:DeleteObject",
-          "s3:ListBucket"
-        ]
-        Resource = [
-          "arn:aws:s3:::terraform-284419413007",
-          "arn:aws:s3:::terraform-284419413007/*"
-        ]
-      }
-    ]
-  })
-
-  tags = {
-    Project   = var.project_name
-    ManagedBy = "terraform"
-  }
-}
 
 # IAM policy for SSM parameter access
 resource "aws_iam_policy" "ssm_parameter_access" {
@@ -177,9 +118,9 @@ resource "aws_iam_policy" "ssm_parameter_access" {
 }
 
 # Attach policies to the GitHub Actions role
-resource "aws_iam_role_policy_attachment" "lambda_deployment" {
+resource "aws_iam_role_policy_attachment" "admin_access" {
   role       = aws_iam_role.github_actions.name
-  policy_arn = aws_iam_policy.lambda_deployment.arn
+  policy_arn = "arn:aws:iam::aws:policy/AdministratorAccess"
 }
 
 resource "aws_iam_role_policy_attachment" "ssm_parameter_access" {
