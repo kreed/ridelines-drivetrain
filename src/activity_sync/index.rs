@@ -2,7 +2,7 @@ use crate::intervals_client::Activity;
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, bincode::Encode, bincode::Decode)]
 pub struct ActivityIndex {
     pub athlete_id: String,
     pub last_updated: String,

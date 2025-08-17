@@ -207,7 +207,7 @@ impl ActivitySync {
                 let index_data = response.body.collect().await?.to_vec();
 
                 // Deserialize
-                let index: ActivityIndex = bincode::deserialize(&index_data)?;
+                let index: ActivityIndex = bincode::decode_from_slice(&index_data, bincode::config::standard())?.0;
                 info!(
                     "Loaded index with {} total activities ({} geojson, {} empty)",
                     index.total_activities(),
@@ -233,7 +233,7 @@ impl ActivitySync {
         );
 
         // Serialize
-        let serialized_data = bincode::serialize(index)?;
+        let serialized_data = bincode::encode_to_vec(index, bincode::config::standard())?;
 
         // Record index size metrics
         metrics_helper::record_index_size_bytes(serialized_data.len() as u64);
