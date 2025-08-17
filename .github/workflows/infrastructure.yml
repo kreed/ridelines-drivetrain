@@ -45,6 +45,13 @@ jobs:
           role-session-name: ${{ github.run_id }}
           aws-region: ${{ env.AWS_REGION }}
 
+      - name: Download latest lambda artifact
+        uses: actions/download-artifact@v5
+        with:
+          pattern: lambda-deployment-package-*
+          path: target/lambda/
+          merge-multiple: true
+
       - name: OpenTofu Format Check
         run: tofu fmt -check
 
