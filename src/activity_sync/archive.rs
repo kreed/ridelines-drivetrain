@@ -3,6 +3,7 @@ use crate::metrics_helper;
 use anyhow::Result;
 use aws_sdk_s3::primitives::ByteStream;
 use function_timer::time;
+use geojson::FeatureCollection;
 use std::fs::File;
 use std::io::{BufRead, BufReader, Read, Write};
 use tracing::{error, info};
@@ -33,7 +34,7 @@ impl ActivitySync {
 
         // Add new activities from temp directory
         let (new_geojson, new_empty) = self.add_new_activities(temp_dir_path, &mut copied_index, &mut geojson_writer).await?;
-        info!("Add {} new activities ({} GeoJSON, {} empty)", new_geojson + new_empty, new_geojson, new_empty);
+        info!("Added {} new activities ({} GeoJSON, {} empty)", new_geojson + new_empty, new_geojson, new_empty);
 
         info!(
             "Finalizing archive with {} total activities ({} GeoJSON, {} empty), {} new activities processed",
@@ -75,23 +76,36 @@ impl ActivitySync {
 
         for line_result in reader.lines() {
             let line = line_result?;
-            let feature = match serde_json::from_str::<serde_json::Value>(&line) {
-                Ok(feature) => feature,
+            let feature_collection: FeatureCollection = match serde_json::from_str(&line) {
+                Ok(fc) => fc,
                 Err(e) => {
-                    error!("Failed to parse JSON from existing activity line: {}", e);
+                    error!("Failed to parse GeoJSON FeatureCollection from existing activity line: {}", e);
                     error!("Problematic line: {}", line);
                     continue;
                 }
             };
 
-            let key = match feature.get("properties")
+            // Extract the first (and only) feature from the collection
+            let feature = match feature_collection.features.first() {
+                Some(feature) => feature,
+                None => {
+                    error!("FeatureCollection contains no features");
+                    continue;
+                }
+            };
+
+            let key = match feature.properties
+                .as_ref()
                 .and_then(|props| {
                     let id = props.get("id").and_then(|v| v.as_str())?;
                     let hash = props.get("activity_hash").and_then(|v| v.as_str())?;
                     Some(ActivityIndex::create_key(id, hash))
                 }) {
                 Some(key) => key,
-                None => continue,
+                None => {
+                    error!("Failed to compute key for existing GeoJSON feature. Properties: {:?}", feature.properties);
+                    continue;
+                }
             };
 
             if copied_index.geojson_activities.contains(&key) {
