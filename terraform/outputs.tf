@@ -1,11 +1,11 @@
 output "lambda_function_name" {
   description = "Name of the Lambda function"
-  value       = aws_lambda_function.intervals_mapper.function_name
+  value       = aws_lambda_function.ridelines_drivetrain.function_name
 }
 
 output "lambda_function_arn" {
   description = "ARN of the Lambda function"
-  value       = aws_lambda_function.intervals_mapper.arn
+  value       = aws_lambda_function.ridelines_drivetrain.arn
 }
 
 output "s3_bucket_name" {
@@ -20,7 +20,7 @@ output "s3_bucket_arn" {
 
 output "lambda_function_url" {
   description = "URL of the Lambda function (if enabled)"
-  value       = var.enable_function_url ? aws_lambda_function_url.intervals_mapper_url[0].function_url : null
+  value       = var.enable_function_url ? aws_lambda_function_url.ridelines_drivetrain_url[0].function_url : null
 }
 
 output "cloudwatch_log_group" {

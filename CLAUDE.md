@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-This is a Rust AWS Lambda function for interfacing with the intervals.icu API to retrieve athlete activity data, sync it to S3, and generate PMTiles for efficient web mapping. The function downloads FIT files, converts them to GeoJSON format, and uses Tippecanoe to create vector tiles optimized for web display.
+This is a Rust AWS Lambda function (ridelines-drivetrain) for interfacing with the intervals.icu API to retrieve athlete activity data, sync it to S3, and generate PMTiles for efficient web mapping. The function downloads FIT files, converts them to GeoJSON format, and uses Tippecanoe to create vector tiles optimized for web display.
 
 ## Development Commands
 

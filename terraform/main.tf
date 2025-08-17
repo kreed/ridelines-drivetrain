@@ -8,7 +8,7 @@ terraform {
 
   backend "s3" {
     bucket = "tofu-042666117628"
-    key    = "intervals-mapper/terraform.tfstate"
+    key    = "ridelines-drivetrain/terraform.tfstate"
   }
 }
 
@@ -18,7 +18,7 @@ provider "aws" {
 
 # Data source to get the tippecanoe layer ARN from SSM
 data "aws_ssm_parameter" "tippecanoe_layer_arn" {
-  name = "/intervals-mapper/tippecanoe-layer-arn"
+  name = "/ridelines-drivetrain/tippecanoe-layer-arn"
 }
 
 # IAM role for Lambda
@@ -143,7 +143,7 @@ resource "aws_iam_policy" "ssm_parameter_access" {
           "ssm:PutParameter",
           "ssm:GetParameters"
         ]
-        Resource = "arn:aws:ssm:${var.aws_region}:*:parameter/${var.project_name}/*"
+        Resource = "arn:aws:ssm:${var.aws_region}:*:parameter/ridelines-drivetrain/*"
       }
     ]
   })
@@ -254,7 +254,7 @@ resource "aws_iam_role_policy" "lambda_secrets_policy" {
 }
 
 # Lambda function
-resource "aws_lambda_function" "intervals_mapper" {
+resource "aws_lambda_function" "ridelines_drivetrain" {
   filename         = "../target/lambda/${var.project_name}/bootstrap.zip"
   function_name    = var.project_name
   role             = aws_iam_role.lambda_role.arn
@@ -283,9 +283,9 @@ resource "aws_lambda_function" "intervals_mapper" {
 }
 
 # Lambda function URL (optional - for HTTP access)
-resource "aws_lambda_function_url" "intervals_mapper_url" {
+resource "aws_lambda_function_url" "ridelines_drivetrain_url" {
   count              = var.enable_function_url ? 1 : 0
-  function_name      = aws_lambda_function.intervals_mapper.function_name
+  function_name      = aws_lambda_function.ridelines_drivetrain.function_name
   authorization_type = "NONE"
 }
 
@@ -293,7 +293,7 @@ resource "aws_lambda_function_url" "intervals_mapper_url" {
 resource "aws_cloudwatch_event_rule" "schedule" {
   count               = var.enable_scheduled_execution ? 1 : 0
   name                = "${var.project_name}-schedule"
-  description         = "Trigger intervals-mapper Lambda function"
+  description         = "Trigger ridelines-drivetrain Lambda function"
   schedule_expression = var.schedule_expression
 }
 
@@ -301,14 +301,14 @@ resource "aws_cloudwatch_event_target" "lambda_target" {
   count     = var.enable_scheduled_execution ? 1 : 0
   rule      = aws_cloudwatch_event_rule.schedule[0].name
   target_id = "IntervalsMapperLambda"
-  arn       = aws_lambda_function.intervals_mapper.arn
+  arn       = aws_lambda_function.ridelines_drivetrain.arn
 }
 
 resource "aws_lambda_permission" "allow_eventbridge" {
   count         = var.enable_scheduled_execution ? 1 : 0
   statement_id  = "AllowExecutionFromEventBridge"
   action        = "lambda:InvokeFunction"
-  function_name = aws_lambda_function.intervals_mapper.function_name
+  function_name = aws_lambda_function.ridelines_drivetrain.function_name
   principal     = "events.amazonaws.com"
   source_arn    = aws_cloudwatch_event_rule.schedule[0].arn
 }

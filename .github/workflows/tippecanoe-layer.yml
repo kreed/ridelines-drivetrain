@@ -86,7 +86,7 @@ jobs:
     - name: Upload layer to AWS
       run: |
         # Create or update Lambda layer
-        LAYER_NAME="${{ vars.PROJECT_NAME || 'intervals-mapper' }}-tippecanoe"
+        LAYER_NAME="${{ vars.PROJECT_NAME || 'ridelines-drivetrain' }}-tippecanoe"
         
         echo "Publishing layer: $LAYER_NAME"
         
@@ -121,7 +121,7 @@ jobs:
         
         # Optionally store in SSM Parameter for Terraform data source
         aws ssm put-parameter \
-          --name "/intervals-mapper/tippecanoe-layer-arn" \
+          --name "/ridelines-drivetrain/tippecanoe-layer-arn" \
           --value "$TIPPECANOE_LAYER_ARN" \
           --type "String" \
           --description "ARN of the tippecanoe Lambda layer" \

@@ -109,7 +109,7 @@ jobs:
 
     - name: Deploy Lambda function
       working-directory: terraform
-      run: tofu apply -auto-approve -target=aws_lambda_function.intervals_mapper
+      run: tofu apply -auto-approve -target=aws_lambda_function.ridelines_drivetrain
 
     - name: Deployment summary
       run: |
