@@ -37,7 +37,7 @@ impl ActivityIndex {
     pub fn try_copy(&self, activity: &Activity, target: &mut ActivityIndex) -> bool {
         let activity_hash = activity.compute_hash();
         let key = Self::create_key(&activity.id, &activity_hash);
-        
+
         if self.geojson_activities.contains(&key) {
             target.geojson_activities.insert(key);
             true

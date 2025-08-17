@@ -16,7 +16,13 @@ pub struct ActivitySync {
 }
 
 impl ActivitySync {
-    pub fn new(api_key: &str, athlete_id: &str, s3_client: S3Client, s3_bucket: &str, work_dir: &std::path::Path) -> Self {
+    pub fn new(
+        api_key: &str,
+        athlete_id: &str,
+        s3_client: S3Client,
+        s3_bucket: &str,
+        work_dir: &std::path::Path,
+    ) -> Self {
         Self {
             intervals_client: IntervalsClient::new(api_key.to_string()),
             s3_client,

@@ -1,4 +1,4 @@
-use super::{ActivitySync, ActivityIndex};
+use super::{ActivityIndex, ActivitySync};
 use crate::convert::convert_fit_to_geojson;
 use crate::intervals_client::Activity;
 use crate::metrics_helper;
@@ -35,36 +35,35 @@ impl ActivitySync {
         );
 
         // Phase 2: Identify unchanged vs new/changed activities and create copied index
-        let (copied_index, changed_activities) =
-            if let Some(ref existing) = existing_index {
-                let mut copied = ActivityIndex::new_empty(self.athlete_id.clone());
-                let mut changed = Vec::new();
+        let (copied_index, changed_activities) = if let Some(ref existing) = existing_index {
+            let mut copied = ActivityIndex::new_empty(self.athlete_id.clone());
+            let mut changed = Vec::new();
 
-                for activity in &activities {
-                    if existing.try_copy(activity, &mut copied) {
-                        metrics_helper::increment_activities_skipped_unchanged(1);
-                    } else {
-                        // Activity is new or changed, add to parallel processing queue
-                        changed.push(activity.clone());
-                    }
+            for activity in &activities {
+                if existing.try_copy(activity, &mut copied) {
+                    metrics_helper::increment_activities_skipped_unchanged(1);
+                } else {
+                    // Activity is new or changed, add to parallel processing queue
+                    changed.push(activity.clone());
                 }
+            }
 
-                info!(
-                    "Keeping {} unchanged activities, queued {} for download.",
-                    copied.total_activities(),
-                    changed.len()
-                );
+            info!(
+                "Keeping {} unchanged activities, queued {} for download.",
+                copied.total_activities(),
+                changed.len()
+            );
 
-                (copied, changed)
-            } else {
-                // No existing index, all activities need processing
-                info!(
-                    "No existing index, processing all {} activities",
-                    activities.len()
-                );
-                let empty_index = ActivityIndex::new_empty(self.athlete_id.clone());
-                (empty_index, activities)
-            };
+            (copied, changed)
+        } else {
+            // No existing index, all activities need processing
+            info!(
+                "No existing index, processing all {} activities",
+                activities.len()
+            );
+            let empty_index = ActivityIndex::new_empty(self.athlete_id.clone());
+            (empty_index, activities)
+        };
 
         // Phase 3: Create subdirectory for changed activities and process them in parallel
         let changed_activities_dir = self.work_dir.join("activities");
@@ -131,10 +130,8 @@ impl ActivitySync {
             }
             Ok(None) => {
                 // No GPS data, create empty stub file with hash in filename
-                let stub_file_path = temp_dir.join(format!(
-                    "activity_{}_{}.stub",
-                    activity.id, activity_hash
-                ));
+                let stub_file_path =
+                    temp_dir.join(format!("activity_{}_{}.stub", activity.id, activity_hash));
 
                 match std::fs::write(&stub_file_path, "") {
                     Ok(_) => {

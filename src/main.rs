@@ -87,7 +87,13 @@ pub(crate) async fn function_handler(event: LambdaEvent<EventBridgeEvent>) -> Re
         .map_err(|e| Error::from(format!("Failed to create work directory: {e}")))?;
 
     // Sync activities and get path to concatenated GeoJSON file
-    let sync_job = ActivitySync::new(api_key, athlete_id, s3_client.clone(), &s3_bucket, work_dir.path());
+    let sync_job = ActivitySync::new(
+        api_key,
+        athlete_id,
+        s3_client.clone(),
+        &s3_bucket,
+        work_dir.path(),
+    );
 
     let geojson_file_path = match sync_job.sync_activities().await {
         Ok(path) => path,

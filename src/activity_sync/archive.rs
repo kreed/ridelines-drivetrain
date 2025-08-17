@@ -1,4 +1,4 @@
-use super::{ActivitySync, ActivityIndex};
+use super::{ActivityIndex, ActivitySync};
 use crate::metrics_helper;
 use anyhow::Result;
 use aws_sdk_s3::primitives::ByteStream;
@@ -21,20 +21,38 @@ impl ActivitySync {
         copied_index.last_updated = chrono::Utc::now().to_rfc3339();
 
         // Create temporary file for new GeoJSON content in work directory
-        let temp_geojson_path = self.work_dir.join(format!("activities_{}.geojson", self.athlete_id));
+        let temp_geojson_path = self
+            .work_dir
+            .join(format!("activities_{}.geojson", self.athlete_id));
         let temp_geojson_file = File::create(&temp_geojson_path)?;
         let mut geojson_writer = std::io::BufWriter::new(temp_geojson_file);
 
-        info!("Creating new activity index. Beginning with {} ({} GeoJSON, {} empty) existing entries.",
-            copied_index.total_activities(), copied_index.geojson_activities.len(), copied_index.empty_activities.len());
+        info!(
+            "Creating new activity index. Beginning with {} ({} GeoJSON, {} empty) existing entries.",
+            copied_index.total_activities(),
+            copied_index.geojson_activities.len(),
+            copied_index.empty_activities.len()
+        );
 
         // Copy existing GeoJSON activities from the existing archive
-        let copied_activities = self.copy_existing_activities(&copied_index, &mut geojson_writer).await?;
-        info!("Copied existing GeoJSON data for {} activities", copied_activities);
+        let copied_activities = self
+            .copy_existing_activities(&copied_index, &mut geojson_writer)
+            .await?;
+        info!(
+            "Copied existing GeoJSON data for {} activities",
+            copied_activities
+        );
 
         // Add new activities from temp directory
-        let (new_geojson, new_empty) = self.add_new_activities(temp_dir_path, &mut copied_index, &mut geojson_writer).await?;
-        info!("Added {} new activities ({} GeoJSON, {} empty)", new_geojson + new_empty, new_geojson, new_empty);
+        let (new_geojson, new_empty) = self
+            .add_new_activities(temp_dir_path, &mut copied_index, &mut geojson_writer)
+            .await?;
+        info!(
+            "Added {} new activities ({} GeoJSON, {} empty)",
+            new_geojson + new_empty,
+            new_geojson,
+            new_empty
+        );
 
         info!(
             "Finalizing archive with {} total activities ({} GeoJSON, {} empty), {} new activities processed",
@@ -48,7 +66,8 @@ impl ActivitySync {
         drop(geojson_writer);
 
         // Compress and upload GeoJSON file
-        self.upload_geojson(&temp_geojson_path.to_string_lossy()).await?;
+        self.upload_geojson(&temp_geojson_path.to_string_lossy())
+            .await?;
 
         // Save index
         self.upload_index(&copied_index).await?;
@@ -79,7 +98,10 @@ impl ActivitySync {
             let feature_collection: FeatureCollection = match serde_json::from_str(&line) {
                 Ok(fc) => fc,
                 Err(e) => {
-                    error!("Failed to parse GeoJSON FeatureCollection from existing activity line: {}", e);
+                    error!(
+                        "Failed to parse GeoJSON FeatureCollection from existing activity line: {}",
+                        e
+                    );
                     error!("Problematic line: {}", line);
                     continue;
                 }
@@ -94,16 +116,17 @@ impl ActivitySync {
                 }
             };
 
-            let key = match feature.properties
-                .as_ref()
-                .and_then(|props| {
-                    let id = props.get("id").and_then(|v| v.as_str())?;
-                    let hash = props.get("activity_hash").and_then(|v| v.as_str())?;
-                    Some(ActivityIndex::create_key(id, hash))
-                }) {
+            let key = match feature.properties.as_ref().and_then(|props| {
+                let id = props.get("id").and_then(|v| v.as_str())?;
+                let hash = props.get("activity_hash").and_then(|v| v.as_str())?;
+                Some(ActivityIndex::create_key(id, hash))
+            }) {
                 Some(key) => key,
                 None => {
-                    error!("Failed to compute key for existing GeoJSON feature. Properties: {:?}", feature.properties);
+                    error!(
+                        "Failed to compute key for existing GeoJSON feature. Properties: {:?}",
+                        feature.properties
+                    );
                     continue;
                 }
             };
@@ -136,7 +159,9 @@ impl ActivitySync {
             let file_path = entry.path();
 
             // Parse activity ID, hash, and extension from filename
-            if let Some((activity_id, activity_hash, extension)) = Self::parse_activity_filename(&file_path) {
+            if let Some((activity_id, activity_hash, extension)) =
+                Self::parse_activity_filename(&file_path)
+            {
                 match extension.as_str() {
                     "geojson" => {
                         if let Ok(geojson_content) = std::fs::read_to_string(&file_path) {
@@ -183,10 +208,12 @@ impl ActivitySync {
 
                 // Deserialize
                 let index: ActivityIndex = bincode::deserialize(&index_data)?;
-                info!("Loaded index with {} total activities ({} geojson, {} empty)", 
+                info!(
+                    "Loaded index with {} total activities ({} geojson, {} empty)",
                     index.total_activities(),
                     index.geojson_activities.len(),
-                    index.empty_activities.len());
+                    index.empty_activities.len()
+                );
                 Ok(index)
             }
             Err(e) => {
@@ -198,14 +225,16 @@ impl ActivitySync {
 
     #[time("upload_index_duration")]
     async fn upload_index(&self, index: &ActivityIndex) -> Result<()> {
-        info!("Saving index with {} total activities ({} geojson, {} empty)", 
+        info!(
+            "Saving index with {} total activities ({} geojson, {} empty)",
             index.total_activities(),
-            index.geojson_activities.len(), 
-            index.empty_activities.len());
+            index.geojson_activities.len(),
+            index.empty_activities.len()
+        );
 
         // Serialize
         let serialized_data = bincode::serialize(index)?;
-        
+
         // Record index size metrics
         metrics_helper::record_index_size_bytes(serialized_data.len() as u64);
 
@@ -234,7 +263,7 @@ impl ActivitySync {
         }
     }
 
-    /// Download and decompress GeoJSON file from S3 
+    /// Download and decompress GeoJSON file from S3
     #[time("download_geojson_duration")]
     async fn download_geojson(&self) -> Result<String> {
         let geojson_key = format!("athletes/{}/activities.geojson.zst", self.athlete_id);
@@ -294,7 +323,6 @@ impl ActivitySync {
         Ok(())
     }
 
-
     /// Parse activity filename to extract ID, hash, and extension
     /// Expected format: activity_{id}_{hash}.{extension}
     fn parse_activity_filename(file_path: &std::path::Path) -> Option<(String, String, String)> {
@@ -315,7 +343,4 @@ impl ActivitySync {
         }
         None
     }
-
-
-
 }
