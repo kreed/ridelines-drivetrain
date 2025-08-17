@@ -1,11 +1,63 @@
-# To get started with Dependabot version updates, you'll need to specify which
-# package ecosystems to update and where the package manifests are located.
-# Please see the documentation for all configuration options:
-# https://docs.github.com/code-security/dependabot/dependabot-version-updates/configuration-options-for-the-dependabot.yml-file
-
 version: 2
 updates:
-  - package-ecosystem: "cargo" # See documentation for possible values
-    directory: "/" # Location of package manifests
+  # Enable version updates for Cargo dependencies
+  - package-ecosystem: "cargo"
+    directory: "/"
     schedule:
-      interval: "monthly"
+      interval: "weekly"
+      day: "monday"
+      time: "09:00"
+    open-pull-requests-limit: 10
+    reviewers:
+      - "chriseby"
+    assignees:
+      - "chriseby"
+    commit-message:
+      prefix: "cargo"
+      include: "scope"
+    groups:
+      aws-sdk:
+        patterns:
+          - "aws-*"
+          - "tokio*"
+      lambda-runtime:
+        patterns:
+          - "lambda*"
+          - "serde*"
+      geospatial:
+        patterns:
+          - "geo*"
+          - "geojson*"
+          - "fitparser*"
+
+  # Enable version updates for GitHub Actions
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "10:00"
+    open-pull-requests-limit: 5
+    reviewers:
+      - "chriseby"
+    assignees:
+      - "chriseby"
+    commit-message:
+      prefix: "ci"
+      include: "scope"
+
+  # Enable version updates for Terraform/OpenTofu
+  - package-ecosystem: "terraform"
+    directory: "/terraform"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "11:00"
+    open-pull-requests-limit: 5
+    reviewers:
+      - "chriseby"
+    assignees:
+      - "chriseby"
+    commit-message:
+      prefix: "terraform"
+      include: "scope"

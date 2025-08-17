@@ -27,3 +27,15 @@ variable "schedule_expression" {
   type        = string
   default     = "rate(6 hours)"
 }
+
+variable "github_org" {
+  description = "GitHub organization/username"
+  type        = string
+  default     = "kreed"
+}
+
+variable "github_repo" {
+  description = "GitHub repository name"
+  type        = string
+  default     = "intervals-mapper"
+}

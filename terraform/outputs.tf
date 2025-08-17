@@ -27,3 +27,13 @@ output "cloudwatch_log_group" {
   description = "Name of the CloudWatch log group"
   value       = aws_cloudwatch_log_group.lambda_logs.name
 }
+
+output "github_actions_role_arn" {
+  description = "ARN of the IAM role for GitHub Actions"
+  value       = aws_iam_role.github_actions.arn
+}
+
+output "github_actions_role_name" {
+  description = "Name of the IAM role for GitHub Actions"
+  value       = aws_iam_role.github_actions.name
+}

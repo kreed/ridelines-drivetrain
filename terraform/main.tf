@@ -51,6 +51,120 @@ resource "aws_cloudwatch_log_group" "lambda_logs" {
   retention_in_days = 14
 }
 
+# Data source for GitHub's OIDC provider
+data "aws_iam_openid_connect_provider" "github" {
+  url = "https://token.actions.githubusercontent.com"
+}
+
+# IAM role for GitHub Actions
+resource "aws_iam_role" "github_actions" {
+  name = "${var.project_name}-github-actions"
+
+  assume_role_policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect = "Allow"
+        Principal = {
+          Federated = data.aws_iam_openid_connect_provider.github.arn
+        }
+        Action = "sts:AssumeRoleWithWebIdentity"
+        Condition = {
+          StringEquals = {
+            "token.actions.githubusercontent.com:aud" = "sts.amazonaws.com"
+          }
+          StringLike = {
+            "token.actions.githubusercontent.com:sub" = [
+              "repo:${var.github_org}/${var.github_repo}:*"
+            ]
+          }
+        }
+      }
+    ]
+  })
+
+  tags = {
+    Project    = var.project_name
+    ManagedBy  = "terraform"
+  }
+}
+
+# IAM policy for Lambda deployment
+resource "aws_iam_policy" "lambda_deployment" {
+  name        = "${var.project_name}-lambda-deployment"
+  description = "Policy for GitHub Actions to deploy Lambda function"
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect = "Allow"
+        Action = [
+          "lambda:UpdateFunctionCode",
+          "lambda:UpdateFunctionConfiguration",
+          "lambda:GetFunction",
+          "lambda:CreateFunction",
+          "lambda:DeleteFunction",
+          "lambda:AddPermission",
+          "lambda:RemovePermission",
+          "lambda:InvokeFunction"
+        ]
+        Resource = "arn:aws:lambda:${var.aws_region}:*:function:${var.project_name}"
+      },
+      {
+        Effect = "Allow"
+        Action = [
+          "lambda:ListLayers",
+          "lambda:GetLayerVersion"
+        ]
+        Resource = "*"
+      }
+    ]
+  })
+
+  tags = {
+    Project    = var.project_name
+    ManagedBy  = "terraform"
+  }
+}
+
+# IAM policy for SSM parameter access
+resource "aws_iam_policy" "ssm_parameter_access" {
+  name        = "${var.project_name}-ssm-parameter-access"
+  description = "Policy for GitHub Actions to access SSM parameters"
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect = "Allow"
+        Action = [
+          "ssm:GetParameter",
+          "ssm:PutParameter",
+          "ssm:GetParameters"
+        ]
+        Resource = "arn:aws:ssm:${var.aws_region}:*:parameter/${var.project_name}/*"
+      }
+    ]
+  })
+
+  tags = {
+    Project    = var.project_name
+    ManagedBy  = "terraform"
+  }
+}
+
+# Attach policies to the GitHub Actions role
+resource "aws_iam_role_policy_attachment" "lambda_deployment" {
+  role       = aws_iam_role.github_actions.name
+  policy_arn = aws_iam_policy.lambda_deployment.arn
+}
+
+resource "aws_iam_role_policy_attachment" "ssm_parameter_access" {
+  role       = aws_iam_role.github_actions.name
+  policy_arn = aws_iam_policy.ssm_parameter_access.arn
+}
+
 # S3 bucket for storing GeoJSON files
 resource "aws_s3_bucket" "geojson_storage" {
   bucket = "${var.project_name}-geojson-${random_id.bucket_suffix.hex}"

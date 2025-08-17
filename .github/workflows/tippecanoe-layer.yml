@@ -14,6 +14,10 @@ on:
 env:
   AWS_REGION: us-west-2
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+
 jobs:
   build-layer:
     runs-on: ubuntu-latest
@@ -21,13 +25,15 @@ jobs:
       contents: read
       id-token: write
     steps:
-    - uses: actions/checkout@v5
+    - name: Checkout code
+      uses: actions/checkout@v5
     
     - name: Configure AWS credentials
       uses: aws-actions/configure-aws-credentials@v4
       with:
         role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
         aws-region: ${{ env.AWS_REGION }}
+        role-session-name: ${{ github.run_id }}
     
     - name: Build tippecanoe layer
       run: |
