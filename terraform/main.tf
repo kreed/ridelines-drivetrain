@@ -7,6 +7,9 @@ terraform {
   }
 
   backend "s3" {
+    bucket = "terraform-284419413007"
+    key    = "ridelines-drivetrain/terraform.tfstate"
+    region = "us-west-2"
   }
 }
 
