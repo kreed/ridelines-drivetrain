@@ -35,46 +35,47 @@ impl ActivitySync {
         );
 
         // Phase 2: Identify unchanged vs new/changed activities and create copied index
-        let (copied_index, changed_activities, has_changes) = if let Some(ref existing) = existing_index {
-            let mut copied = ActivityIndex::new_empty(self.athlete_id.clone());
-            let mut changed = Vec::new();
+        let (copied_index, changed_activities, has_changes) =
+            if let Some(ref existing) = existing_index {
+                let mut copied = ActivityIndex::new_empty(self.athlete_id.clone());
+                let mut changed = Vec::new();
 
-            for activity in &activities {
-                if existing.try_copy(activity, &mut copied) {
-                    metrics_helper::increment_activities_skipped_unchanged(1);
-                } else {
-                    // Activity is new or changed, add to parallel processing queue
-                    changed.push(activity.clone());
+                for activity in &activities {
+                    if existing.try_copy(activity, &mut copied) {
+                        metrics_helper::increment_activities_skipped_unchanged(1);
+                    } else {
+                        // Activity is new or changed, add to parallel processing queue
+                        changed.push(activity.clone());
+                    }
                 }
-            }
 
-            // Check if activities were deleted (existed before but not in current list)
-            let activities_deleted = existing.total_activities() > copied.total_activities();
-            let has_changes = !changed.is_empty() || activities_deleted;
+                // Check if activities were deleted (existed before but not in current list)
+                let activities_deleted = existing.total_activities() > copied.total_activities();
+                let has_changes = !changed.is_empty() || activities_deleted;
 
-            if activities_deleted {
+                if activities_deleted {
+                    info!(
+                        "Detected {} deleted activities",
+                        existing.total_activities() - copied.total_activities()
+                    );
+                }
+
                 info!(
-                    "Detected {} deleted activities",
-                    existing.total_activities() - copied.total_activities()
+                    "Keeping {} unchanged activities, queued {} for download.",
+                    copied.total_activities(),
+                    changed.len()
                 );
-            }
 
-            info!(
-                "Keeping {} unchanged activities, queued {} for download.",
-                copied.total_activities(),
-                changed.len()
-            );
-
-            (copied, changed, has_changes)
-        } else {
-            // No existing index, all activities need processing
-            info!(
-                "No existing index, processing all {} activities",
-                activities.len()
-            );
-            let empty_index = ActivityIndex::new_empty(self.athlete_id.clone());
-            (empty_index, activities, true)  // Always has changes when starting fresh
-        };
+                (copied, changed, has_changes)
+            } else {
+                // No existing index, all activities need processing
+                info!(
+                    "No existing index, processing all {} activities",
+                    activities.len()
+                );
+                let empty_index = ActivityIndex::new_empty(self.athlete_id.clone());
+                (empty_index, activities, true) // Always has changes when starting fresh
+            };
 
         // Short circuit: if no changes detected, skip archive upload and tile generation
         if !has_changes {

@@ -207,7 +207,8 @@ impl ActivitySync {
                 let index_data = response.body.collect().await?.to_vec();
 
                 // Deserialize
-                let index: ActivityIndex = bincode::decode_from_slice(&index_data, bincode::config::standard())?.0;
+                let index: ActivityIndex =
+                    bincode::decode_from_slice(&index_data, bincode::config::standard())?.0;
                 info!(
                     "Loaded index with {} total activities ({} geojson, {} empty)",
                     index.total_activities(),
@@ -328,7 +329,8 @@ impl ActivitySync {
     fn parse_activity_filename(file_path: &std::path::Path) -> Option<(String, String, String)> {
         if let Some(file_name) = file_path.file_stem().and_then(|s| s.to_str())
             && let Some(info_part) = file_name.strip_prefix("activity_")
-            && let Some(last_underscore) = info_part.rfind('_') {
+            && let Some(last_underscore) = info_part.rfind('_')
+        {
             let activity_id = &info_part[..last_underscore];
             let activity_hash = &info_part[last_underscore + 1..];
             if let Some(extension) = file_path.extension().and_then(|s| s.to_str()) {
