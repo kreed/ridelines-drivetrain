@@ -58,9 +58,7 @@ jobs:
         
         # Copy binaries and dependencies
         RUN mkdir -p /layer/bin /layer/lib
-        RUN cp tippecanoe tile-join /layer/bin/
         RUN ldd /layer/bin/tippecanoe | grep "=> /" | awk '{print $3}' | xargs -I '{}' cp '{}' /layer/lib/ || true
-        RUN ldd /layer/bin/tile-join | grep "=> /" | awk '{print $3}' | xargs -I '{}' cp '{}' /layer/lib/ || true
         
         # Make binaries executable
         RUN chmod +x /layer/bin/*
