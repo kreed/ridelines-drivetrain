@@ -7,8 +7,6 @@ terraform {
   }
 
   backend "s3" {
-    bucket = "tofu-042666117628"
-    key    = "ridelines-drivetrain/terraform.tfstate"
   }
 }
 
@@ -110,6 +108,14 @@ resource "aws_iam_policy" "lambda_deployment" {
           "lambda:InvokeFunction"
         ]
         Resource = "arn:aws:lambda:${var.aws_region}:*:function:${var.project_name}"
+      },
+      {
+        Effect = "Allow"
+        Action = [
+          "lambda:PublishLayerVersion",
+          "lambda:GetLayerVersion"
+        ]
+        Resource = "arn:aws:lambda:${var.aws_region}:*:layer:${var.project_name}-*"
       },
       {
         Effect = "Allow"

@@ -3,7 +3,7 @@ name: Build Tippecanoe Layer
 on:
   push:
     paths:
-      - '.github/workflows/build-layer.yml'
+      - '.github/workflows/tippecanoe-layer.yml'
   workflow_dispatch:
     inputs:
       tippecanoe_version:
