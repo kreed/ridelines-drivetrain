@@ -84,8 +84,8 @@ resource "aws_iam_role" "github_actions" {
   })
 
   tags = {
-    Project    = var.project_name
-    ManagedBy  = "terraform"
+    Project   = var.project_name
+    ManagedBy = "terraform"
   }
 }
 
@@ -123,8 +123,8 @@ resource "aws_iam_policy" "lambda_deployment" {
   })
 
   tags = {
-    Project    = var.project_name
-    ManagedBy  = "terraform"
+    Project   = var.project_name
+    ManagedBy = "terraform"
   }
 }
 
@@ -149,8 +149,8 @@ resource "aws_iam_policy" "ssm_parameter_access" {
   })
 
   tags = {
-    Project    = var.project_name
-    ManagedBy  = "terraform"
+    Project   = var.project_name
+    ManagedBy = "terraform"
   }
 }
 

@@ -326,19 +326,17 @@ impl ActivitySync {
     /// Parse activity filename to extract ID, hash, and extension
     /// Expected format: activity_{id}_{hash}.{extension}
     fn parse_activity_filename(file_path: &std::path::Path) -> Option<(String, String, String)> {
-        if let Some(file_name) = file_path.file_stem().and_then(|s| s.to_str()) {
-            if let Some(info_part) = file_name.strip_prefix("activity_") {
-                if let Some(last_underscore) = info_part.rfind('_') {
-                    let activity_id = &info_part[..last_underscore];
-                    let activity_hash = &info_part[last_underscore + 1..];
-                    if let Some(extension) = file_path.extension().and_then(|s| s.to_str()) {
-                        return Some((
-                            activity_id.to_string(),
-                            activity_hash.to_string(),
-                            extension.to_string(),
-                        ));
-                    }
-                }
+        if let Some(file_name) = file_path.file_stem().and_then(|s| s.to_str())
+            && let Some(info_part) = file_name.strip_prefix("activity_")
+            && let Some(last_underscore) = info_part.rfind('_') {
+            let activity_id = &info_part[..last_underscore];
+            let activity_hash = &info_part[last_underscore + 1..];
+            if let Some(extension) = file_path.extension().and_then(|s| s.to_str()) {
+                return Some((
+                    activity_id.to_string(),
+                    activity_hash.to_string(),
+                    extension.to_string(),
+                ));
             }
         }
         None
