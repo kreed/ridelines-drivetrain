@@ -127,6 +127,19 @@ resource "aws_iam_policy" "lambda_deployment" {
           "lambda:GetLayerVersion"
         ]
         Resource = "*"
+      },
+      {
+        Effect = "Allow"
+        Action = [
+          "s3:GetObject",
+          "s3:PutObject",
+          "s3:DeleteObject",
+          "s3:ListBucket"
+        ]
+        Resource = [
+          "arn:aws:s3:::terraform-284419413007",
+          "arn:aws:s3:::terraform-284419413007/*"
+        ]
       }
     ]
   })
