@@ -112,8 +112,9 @@ pub(crate) async fn function_handler(event: LambdaEvent<EventBridgeEvent>) -> Re
     };
 
     // Generate PMTiles from the concatenated GeoJSON file
-    let tile_generator = TileGenerator::new(s3_client, cloudfront_client, athlete_id.to_string())
-        .map_err(|e| Error::from(format!("Failed to create TileGenerator: {e}")))?;
+    let tile_generator =
+        TileGenerator::new(s3_client, cloudfront_client, athlete_id.to_string())
+            .map_err(|e| Error::from(format!("Failed to create TileGenerator: {e}")))?;
 
     let tile_result = tile_generator
         .generate_pmtiles_from_file(&geojson_file_path.to_string_lossy())

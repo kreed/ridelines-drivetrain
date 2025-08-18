@@ -19,12 +19,16 @@ pub struct TileGenerator {
 }
 
 impl TileGenerator {
-    pub fn new(s3_client: S3Client, cloudfront_client: CloudFrontClient, athlete_id: String) -> Result<Self> {
+    pub fn new(
+        s3_client: S3Client,
+        cloudfront_client: CloudFrontClient,
+        athlete_id: String,
+    ) -> Result<Self> {
         let activities_bucket = env::var("ACTIVITIES_S3_BUCKET")
             .context("ACTIVITIES_S3_BUCKET environment variable not set")?;
         let cloudfront_distribution_id = env::var("CLOUDFRONT_DISTRIBUTION_ID")
             .context("CLOUDFRONT_DISTRIBUTION_ID environment variable not set")?;
-        
+
         Ok(Self {
             s3_client,
             cloudfront_client,
@@ -134,10 +138,13 @@ impl TileGenerator {
 
     #[time("cloudfront_invalidation_duration")]
     async fn invalidate_cloudfront_cache(&self) -> Result<()> {
-        info!("Invalidating CloudFront cache for athlete {}", self.athlete_id);
+        info!(
+            "Invalidating CloudFront cache for athlete {}",
+            self.athlete_id
+        );
 
         let invalidation_path = format!("/activities/{}.pmtiles", self.athlete_id);
-        
+
         match self
             .cloudfront_client
             .create_invalidation()
@@ -149,20 +156,27 @@ impl TileGenerator {
                             .quantity(1)
                             .items(invalidation_path.clone())
                             .build()
-                            .context("Failed to build invalidation paths")?)
+                            .context("Failed to build invalidation paths")?,
+                    )
                     .caller_reference(format!("{}-{}", self.athlete_id, Utc::now().timestamp()))
                     .build()
-                    .context("Failed to build invalidation batch")?)
+                    .context("Failed to build invalidation batch")?,
+            )
             .send()
             .await
         {
             Ok(response) => {
-                info!("Successfully created CloudFront invalidation: {:?}", response.invalidation().unwrap().id());
+                info!(
+                    "Successfully created CloudFront invalidation: {:?}",
+                    response.invalidation().unwrap().id()
+                );
                 Ok(())
             }
             Err(e) => {
                 error!("Failed to create CloudFront invalidation: {}", e);
-                Err(anyhow::anyhow!("Failed to invalidate CloudFront cache: {e}"))
+                Err(anyhow::anyhow!(
+                    "Failed to invalidate CloudFront cache: {e}"
+                ))
             }
         }
     }
