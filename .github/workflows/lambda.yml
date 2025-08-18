@@ -81,6 +81,9 @@ jobs:
       contents: read
       id-token: write
     if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    env:
+      TF_VAR_activities_bucket_name: ${{ vars.ACTIVITIES_BUCKET_NAME }}
+      TF_VAR_cloudfront_distribution_id: ${{ vars.CLOUDFRONT_DISTRIBUTION_ID }}
     steps:
     - name: Checkout code
       uses: actions/checkout@v5

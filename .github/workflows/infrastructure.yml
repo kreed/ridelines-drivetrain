@@ -15,6 +15,8 @@ on:
 
 env:
   AWS_REGION: us-west-2
+  TF_VAR_activities_bucket_name: ${{ vars.ACTIVITIES_BUCKET_NAME }}
+  TF_VAR_cloudfront_distribution_id: ${{ vars.CLOUDFRONT_DISTRIBUTION_ID }}
 
 permissions:
   id-token: write
