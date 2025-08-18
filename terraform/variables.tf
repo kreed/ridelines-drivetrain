@@ -39,3 +39,13 @@ variable "github_repo" {
   type        = string
   default     = "ridelines-drivetrain"
 }
+
+variable "activities_bucket_name" {
+  description = "Name of the S3 bucket for activities (PMTiles)"
+  type        = string
+}
+
+variable "cloudfront_distribution_id" {
+  description = "CloudFront distribution ID for cache invalidation"
+  type        = string
+}

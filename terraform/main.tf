@@ -188,7 +188,7 @@ resource "aws_iam_role_policy" "lambda_s3_policy" {
           "s3:PutObjectAcl"
         ]
         Resource = [
-          "arn:aws:s3:::kreed.org-website/*"
+          "arn:aws:s3:::${var.activities_bucket_name}/*"
         ]
       }
     ]
@@ -216,6 +216,28 @@ resource "aws_iam_role_policy" "lambda_secrets_policy" {
   })
 }
 
+# IAM policy for CloudFront invalidation
+resource "aws_iam_role_policy" "lambda_cloudfront_policy" {
+  name = "${var.project_name}-cloudfront-policy"
+  role = aws_iam_role.lambda_role.id
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect = "Allow"
+        Action = [
+          "cloudfront:CreateInvalidation",
+          "cloudfront:GetDistribution"
+        ]
+        Resource = [
+          "arn:aws:cloudfront::*:distribution/${var.cloudfront_distribution_id}"
+        ]
+      }
+    ]
+  })
+}
+
 # Lambda function
 resource "aws_lambda_function" "ridelines_drivetrain" {
   filename         = "../target/lambda/${var.project_name}/bootstrap.zip"
@@ -233,9 +255,11 @@ resource "aws_lambda_function" "ridelines_drivetrain" {
 
   environment {
     variables = {
-      SECRETS_MANAGER_SECRET_ARN = aws_secretsmanager_secret.intervals_api_key.arn
-      S3_BUCKET                  = aws_s3_bucket.geojson_storage.bucket
-      RUST_LOG                   = "info"
+      SECRETS_MANAGER_SECRET_ARN   = aws_secretsmanager_secret.intervals_api_key.arn
+      S3_BUCKET                    = aws_s3_bucket.geojson_storage.bucket
+      ACTIVITIES_S3_BUCKET         = var.activities_bucket_name
+      CLOUDFRONT_DISTRIBUTION_ID   = var.cloudfront_distribution_id
+      RUST_LOG                     = "info"
     }
   }
 

@@ -4,6 +4,7 @@ use metrics_cloudwatch_embedded::lambda::handler::run;
 use tracing::info_span;
 
 use aws_config::BehaviorVersion;
+use aws_sdk_cloudfront::Client as CloudFrontClient;
 use aws_sdk_s3::Client as S3Client;
 use aws_sdk_secretsmanager::Client as SecretsManagerClient;
 use function_timer::time;
@@ -68,6 +69,7 @@ pub(crate) async fn function_handler(event: LambdaEvent<EventBridgeEvent>) -> Re
     // Initialize AWS SDK
     let config = aws_config::load_defaults(BehaviorVersion::latest()).await;
     let s3_client = S3Client::new(&config);
+    let cloudfront_client = CloudFrontClient::new(&config);
     let secrets_client = SecretsManagerClient::new(&config);
 
     // Retrieve API key from Secrets Manager
@@ -110,7 +112,8 @@ pub(crate) async fn function_handler(event: LambdaEvent<EventBridgeEvent>) -> Re
     };
 
     // Generate PMTiles from the concatenated GeoJSON file
-    let tile_generator = TileGenerator::new(s3_client, athlete_id.to_string());
+    let tile_generator = TileGenerator::new(s3_client, cloudfront_client, athlete_id.to_string())
+        .map_err(|e| Error::from(format!("Failed to create TileGenerator: {e}")))?;
 
     let tile_result = tile_generator
         .generate_pmtiles_from_file(&geojson_file_path.to_string_lossy())
