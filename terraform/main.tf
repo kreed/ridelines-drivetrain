@@ -255,11 +255,11 @@ resource "aws_lambda_function" "ridelines_drivetrain" {
 
   environment {
     variables = {
-      SECRETS_MANAGER_SECRET_ARN   = aws_secretsmanager_secret.intervals_api_key.arn
-      S3_BUCKET                    = aws_s3_bucket.geojson_storage.bucket
-      ACTIVITIES_S3_BUCKET         = var.activities_bucket_name
-      CLOUDFRONT_DISTRIBUTION_ID   = var.cloudfront_distribution_id
-      RUST_LOG                     = "info"
+      SECRETS_MANAGER_SECRET_ARN = aws_secretsmanager_secret.intervals_api_key.arn
+      S3_BUCKET                  = aws_s3_bucket.geojson_storage.bucket
+      ACTIVITIES_S3_BUCKET       = var.activities_bucket_name
+      CLOUDFRONT_DISTRIBUTION_ID = var.cloudfront_distribution_id
+      RUST_LOG                   = "info"
     }
   }
 
