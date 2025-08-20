@@ -1,0 +1,117 @@
+name: Build and Publish Drivetrain
+
+on:
+  push:
+    branches: [main]
+    paths-ignore: 
+      - '*.md'
+      - '.gitignore'
+      - 'LICENSE'
+  pull_request:
+    branches: [main]
+    paths-ignore:
+      - '*.md'
+      - '.gitignore'
+      - 'LICENSE'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: write
+
+env:
+  REGISTRY: ghcr.io
+  LAMBDA_IMAGE_NAME: ridelines/drivetrain-lambda
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test-rust:
+    name: Test Rust Code
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v5
+
+      - name: Install Rust toolchain with Cargo Lambda
+        uses: moonrepo/setup-rust@v1
+        with:
+          bins: cargo-lambda
+
+      - name: Run tests
+        run: cargo test
+
+      - name: Run clippy
+        run: cargo clippy -- -D warnings
+
+      - name: Check formatting
+        run: cargo fmt --check
+
+  build-lambda:
+    name: Build and Publish Lambda Package
+    needs: test-rust
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v5
+
+      - name: Install Rust toolchain with Cargo Lambda
+        uses: moonrepo/setup-rust@v1
+        with:
+          bins: cargo-lambda
+
+      - name: Install Zig toolchain
+        uses: mlugg/setup-zig@v2
+        with:
+          version: 0.14.1
+
+      - name: Build Lambda function
+        run: cargo lambda build --release --output-format zip
+
+      - name: Create Lambda Dockerfile
+        run: |
+          cat > Dockerfile.lambda << 'EOF'
+          FROM scratch
+          COPY target/lambda/ridelines-drivetrain/bootstrap.zip /lambda-package.zip
+          EOF
+
+      - name: Log in to Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract metadata for Lambda
+        id: meta-lambda
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.LAMBDA_IMAGE_NAME }}
+          tags: |
+            type=ref,event=branch
+            type=sha,prefix={{branch}}-
+            type=raw,value=latest,enable={{is_default_branch}}
+
+      - name: Build and push Lambda container image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: ./Dockerfile.lambda
+          push: true
+          tags: ${{ steps.meta-lambda.outputs.tags }}
+          labels: ${{ steps.meta-lambda.outputs.labels }}
+
+      - name: Lambda package summary
+        run: |
+          echo "## Lambda Package Build Summary" >> $GITHUB_STEP_SUMMARY
+          echo "✅ Lambda function built successfully" >> $GITHUB_STEP_SUMMARY
+          echo "✅ Container image published to registry" >> $GITHUB_STEP_SUMMARY
+          echo "📦 Package: ${{ env.REGISTRY }}/${{ env.LAMBDA_IMAGE_NAME }}" >> $GITHUB_STEP_SUMMARY
+          echo "🏷️ Tags: " >> $GITHUB_STEP_SUMMARY
+          echo "${{ steps.meta-lambda.outputs.tags }}" >> $GITHUB_STEP_SUMMARY
+
+
