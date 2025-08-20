@@ -11,9 +11,6 @@ on:
         required: true
         default: 'main'
 
-env:
-  AWS_REGION: us-west-2
-
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: false
@@ -23,26 +20,20 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: read
-      id-token: write
+      packages: write
     steps:
     - name: Checkout code
       uses: actions/checkout@v5
-    
-    - name: Configure AWS credentials
-      uses: aws-actions/configure-aws-credentials@v4
-      with:
-        role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
-        aws-region: ${{ env.AWS_REGION }}
-        role-session-name: ${{ github.run_id }}
     
     - name: Build tippecanoe layer
       run: |
         # Create layer directory structure
         mkdir -p layer/bin layer/lib
         
-        # Build tippecanoe in Docker container compatible with Lambda runtime
+        # Build tippecanoe layer with multi-stage Docker build
         cat > Dockerfile.layer << 'EOF'
-        FROM public.ecr.aws/lambda/provided:al2023
+        # Build stage
+        FROM public.ecr.aws/lambda/provided:al2023 AS builder
         
         # Install build dependencies
         RUN dnf update -y && \
@@ -63,65 +54,31 @@ jobs:
         
         # Make binaries executable
         RUN chmod +x /layer/bin/*
-        EOF
-        
-        # Build the layer
-        docker build -f Dockerfile.layer --build-arg TIPPECANOE_VERSION=${{ github.event.inputs.tippecanoe_version || 'main' }} -t tippecanoe-layer .
-        
-        # Extract layer contents
-        docker create --name temp-container tippecanoe-layer
-        docker cp temp-container:/layer/. layer/
-        docker rm temp-container
         
         # Create layer zip
-        cd layer
-        zip -r ../tippecanoe-layer.zip .
-        cd ..
+        WORKDIR /layer
+        RUN zip -r /tippecanoe-layer.zip .
         
-        echo "Layer contents:"
-        ls -la layer/bin/
-        ls -la layer/lib/
+        # Final stage - package for GHCR
+        FROM scratch
+        COPY --from=builder /tippecanoe-layer.zip /layer-package.zip
+        EOF
         
-    - name: Upload layer to AWS
+        # Build the layer container
+        docker build -f Dockerfile.layer --build-arg TIPPECANOE_VERSION=${{ github.event.inputs.tippecanoe_version || 'main' }} -t tippecanoe-layer .
+        
+        echo "Layer build complete"
+
+    - name: Log in to Container Registry
+      uses: docker/login-action@v3
+      with:
+        registry: ghcr.io
+        username: ${{ github.actor }}
+        password: ${{ secrets.GITHUB_TOKEN }}
+
+    - name: Push Layer container image
       run: |
-        # Create or update Lambda layer
-        LAYER_NAME="${{ vars.PROJECT_NAME || 'ridelines-drivetrain' }}-tippecanoe"
-        
-        echo "Publishing layer: $LAYER_NAME"
-        
-        LAYER_VERSION=$(aws lambda publish-layer-version \
-          --layer-name "$LAYER_NAME" \
-          --zip-file fileb://tippecanoe-layer.zip \
-          --description "Tippecanoe binaries for vector tile generation (built from ${{ github.event.inputs.tippecanoe_version || 'main' }})" \
-          --compatible-runtimes provided.al2023 \
-          --query 'Version' \
-          --output text)
-        
-        echo "Created layer version: $LAYER_VERSION"
-        
-        LAYER_ARN=$(aws lambda get-layer-version \
-          --layer-name "$LAYER_NAME" \
-          --version-number "$LAYER_VERSION" \
-          --query 'LayerVersionArn' \
-          --output text)
-        
-        echo "Layer ARN: $LAYER_ARN"
-        echo "TIPPECANOE_LAYER_ARN=$LAYER_ARN" >> $GITHUB_ENV
-        
-        # Save layer ARN to output for other workflows
-        echo "::notice title=Layer Created::Tippecanoe layer created with ARN: $LAYER_ARN"
-        
-    - name: Store layer ARN for Terraform
-      run: |
-        # Store the layer ARN in a way that Terraform can reference it
-        echo "Tippecanoe layer created successfully!"
-        echo "Add this to your Terraform lambda function:"
-        echo "layers = [\"$TIPPECANOE_LAYER_ARN\"]"
-        
-        # Optionally store in SSM Parameter for Terraform data source
-        aws ssm put-parameter \
-          --name "/ridelines-drivetrain/tippecanoe-layer-arn" \
-          --value "$TIPPECANOE_LAYER_ARN" \
-          --type "String" \
-          --description "ARN of the tippecanoe Lambda layer" \
-          --overwrite
+        docker tag tippecanoe-layer ghcr.io/ridelines/drivetrain-tippecanoe-layer:${{ github.sha }}
+        docker push ghcr.io/ridelines/drivetrain-tippecanoe-layer:${{ github.sha }}
+        docker tag tippecanoe-layer ghcr.io/ridelines/drivetrain-tippecanoe-layer:latest
+        docker push ghcr.io/ridelines/drivetrain-tippecanoe-layer:latest
