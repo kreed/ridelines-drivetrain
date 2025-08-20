@@ -11,6 +11,10 @@ on:
         required: true
         default: 'main'
 
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: kreed/ridelines-tippecanoe-layer
+
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: false
@@ -25,12 +29,8 @@ jobs:
     - name: Checkout code
       uses: actions/checkout@v5
     
-    - name: Build tippecanoe layer
+    - name: Create Dockerfile
       run: |
-        # Create layer directory structure
-        mkdir -p layer/bin layer/lib
-        
-        # Build tippecanoe layer with multi-stage Docker build
         cat > Dockerfile.layer << 'EOF'
         # Build stage
         FROM public.ecr.aws/lambda/provided:al2023 AS builder
@@ -64,21 +64,32 @@ jobs:
         COPY --from=builder /tippecanoe-layer.zip /layer-package.zip
         EOF
         
-        # Build the layer container
-        docker build -f Dockerfile.layer --build-arg TIPPECANOE_VERSION=${{ github.event.inputs.tippecanoe_version || 'main' }} -t tippecanoe-layer .
-        
-        echo "Layer build complete"
+        echo "Tippecanoe layer Dockerfile created"
 
     - name: Log in to Container Registry
       uses: docker/login-action@v3
       with:
-        registry: ghcr.io
+        registry: ${{ env.REGISTRY }}
         username: ${{ github.actor }}
         password: ${{ secrets.GITHUB_TOKEN }}
 
-    - name: Push Layer container image
-      run: |
-        docker tag tippecanoe-layer ghcr.io/ridelines/drivetrain-tippecanoe-layer:${{ github.sha }}
-        docker push ghcr.io/ridelines/drivetrain-tippecanoe-layer:${{ github.sha }}
-        docker tag tippecanoe-layer ghcr.io/ridelines/drivetrain-tippecanoe-layer:latest
-        docker push ghcr.io/ridelines/drivetrain-tippecanoe-layer:latest
+    - name: Extract metadata
+      id: meta
+      uses: docker/metadata-action@v5
+      with:
+        images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+        tags: |
+          type=ref,event=branch
+          type=sha,prefix={{branch}}-
+          type=raw,value=latest,enable={{is_default_branch}}
+
+    - name: Build and push container image
+      uses: docker/build-push-action@v5
+      with:
+        context: .
+        file: ./Dockerfile.layer
+        push: true
+        tags: ${{ steps.meta.outputs.tags }}
+        labels: ${{ steps.meta.outputs.labels }}
+        build-args: |
+          TIPPECANOE_VERSION=${{ github.event.inputs.tippecanoe_version || 'main' }}

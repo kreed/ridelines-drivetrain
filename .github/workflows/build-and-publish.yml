@@ -21,7 +21,7 @@ permissions:
 
 env:
   REGISTRY: ghcr.io
-  LAMBDA_IMAGE_NAME: ridelines/drivetrain-lambda
+  IMAGE_NAME: kreed/ridelines-drivetrain
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -90,7 +90,7 @@ jobs:
         id: meta-lambda
         uses: docker/metadata-action@v5
         with:
-          images: ${{ env.REGISTRY }}/${{ env.LAMBDA_IMAGE_NAME }}
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
           tags: |
             type=ref,event=branch
             type=sha,prefix={{branch}}-
@@ -110,7 +110,7 @@ jobs:
           echo "## Lambda Package Build Summary" >> $GITHUB_STEP_SUMMARY
           echo "✅ Lambda function built successfully" >> $GITHUB_STEP_SUMMARY
           echo "✅ Container image published to registry" >> $GITHUB_STEP_SUMMARY
-          echo "📦 Package: ${{ env.REGISTRY }}/${{ env.LAMBDA_IMAGE_NAME }}" >> $GITHUB_STEP_SUMMARY
+          echo "📦 Package: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}" >> $GITHUB_STEP_SUMMARY
           echo "🏷️ Tags: " >> $GITHUB_STEP_SUMMARY
           echo "${{ steps.meta-lambda.outputs.tags }}" >> $GITHUB_STEP_SUMMARY
 
