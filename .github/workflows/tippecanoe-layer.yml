@@ -40,7 +40,6 @@ jobs:
         COMMIT_SHA=$(git rev-parse HEAD)
         echo "sha=${COMMIT_SHA}" >> $GITHUB_OUTPUT
         echo "Tippecanoe commit SHA: ${COMMIT_SHA}"
-        echo "{\"tippecanoe_commit\": \"${COMMIT_SHA}\"}" > ../manifest.json
     
     - name: Create Dockerfile
       run: |
@@ -74,7 +73,6 @@ jobs:
         # Final stage - package for GHCR
         FROM scratch
         COPY --from=builder /tippecanoe-layer.zip /layer-package.zip
-        COPY manifest.json /manifest.json
         EOF
         
         echo "Tippecanoe layer Dockerfile created"
@@ -102,6 +100,8 @@ jobs:
         file: ./Dockerfile.layer
         push: true
         tags: ${{ steps.meta.outputs.tags }}
-        labels: ${{ steps.meta.outputs.labels }}
+        labels: |
+          ${{ steps.meta.outputs.labels }}
+          ridelines.tippecanoe.commit=${{ steps.tippecanoe_sha.outputs.sha }}
         build-args: |
           TIPPECANOE_VERSION=${{ github.event.inputs.tippecanoe_version || 'main' }}

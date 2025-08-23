@@ -69,6 +69,13 @@ jobs:
         with:
           version: 0.14.1
 
+      - name: Get drivetrain commit SHA
+        id: drivetrain_sha
+        run: |
+          COMMIT_SHA=$(git rev-parse HEAD)
+          echo "sha=${COMMIT_SHA}" >> $GITHUB_OUTPUT
+          echo "Drivetrain commit SHA: ${COMMIT_SHA}"
+
       - name: Build Lambda function
         run: cargo lambda build --release --output-format zip
 
@@ -103,7 +110,9 @@ jobs:
           file: ./Dockerfile.lambda
           push: true
           tags: ${{ steps.meta-lambda.outputs.tags }}
-          labels: ${{ steps.meta-lambda.outputs.labels }}
+          labels: |
+            ${{ steps.meta-lambda.outputs.labels }}
+            ridelines.drivetrain.commit=${{ steps.drivetrain_sha.outputs.sha }}
 
       - name: Lambda package summary
         run: |
