@@ -26,8 +26,21 @@ jobs:
       contents: read
       packages: write
     steps:
-    - name: Checkout code
+    - name: Checkout tippecanoe
       uses: actions/checkout@v5
+      with:
+        repository: felt/tippecanoe
+        ref: ${{ github.event.inputs.tippecanoe_version || 'main' }}
+        path: tippecanoe
+    
+    - name: Get tippecanoe commit SHA
+      id: tippecanoe_sha
+      run: |
+        cd tippecanoe
+        COMMIT_SHA=$(git rev-parse HEAD)
+        echo "sha=${COMMIT_SHA}" >> $GITHUB_OUTPUT
+        echo "Tippecanoe commit SHA: ${COMMIT_SHA}"
+        echo "{\"tippecanoe_commit\": \"${COMMIT_SHA}\"}" > ../manifest.json
     
     - name: Create Dockerfile
       run: |
@@ -39,12 +52,11 @@ jobs:
         RUN dnf update -y && \
             dnf install -y gcc-c++ make sqlite-devel zlib-devel git
         
-        # Clone and build tippecanoe
-        WORKDIR /build
-        RUN git clone https://github.com/felt/tippecanoe.git
+        # Copy tippecanoe source
+        COPY tippecanoe /build/tippecanoe
+        
+        # Build tippecanoe
         WORKDIR /build/tippecanoe
-        ARG TIPPECANOE_VERSION=main
-        RUN git checkout ${TIPPECANOE_VERSION}
         RUN make
         
         # Copy binaries and dependencies
@@ -62,6 +74,7 @@ jobs:
         # Final stage - package for GHCR
         FROM scratch
         COPY --from=builder /tippecanoe-layer.zip /layer-package.zip
+        COPY manifest.json /manifest.json
         EOF
         
         echo "Tippecanoe layer Dockerfile created"
@@ -79,9 +92,8 @@ jobs:
       with:
         images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
         tags: |
-          type=ref,event=branch
-          type=sha,prefix={{branch}}-
-          type=raw,value=latest,enable={{is_default_branch}}
+          type=raw,value=tippecanoe-${{ steps.tippecanoe_sha.outputs.sha }}
+          type=raw,value=latest
 
     - name: Build and push container image
       uses: docker/build-push-action@v5
