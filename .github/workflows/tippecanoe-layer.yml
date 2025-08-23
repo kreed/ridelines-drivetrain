@@ -50,7 +50,7 @@ jobs:
         
         # Install build dependencies
         RUN dnf update -y && \
-            dnf install -y gcc-c++ make sqlite-devel zlib-devel git
+            dnf install -y gcc-c++ make sqlite-devel zlib-devel
         
         # Copy tippecanoe source
         COPY tippecanoe /build/tippecanoe
