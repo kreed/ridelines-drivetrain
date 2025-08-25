@@ -1,4 +1,28 @@
+use chrono::{DateTime, Utc};
+use serde::{Deserialize, Serialize};
 use std::fmt;
+
+// DynamoDB User table record
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct User {
+    pub id: String,
+    pub athlete_id: String,
+    pub username: Option<String>,
+    pub email: Option<String>,
+    pub created_at: DateTime<Utc>,
+    pub updated_at: DateTime<Utc>,
+    pub last_login: DateTime<Utc>,
+    pub intervals_access_token: String,
+}
+
+// DynamoDB OAuth state table record
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct OAuthState {
+    pub state: String,
+    pub created_at: DateTime<Utc>,
+    pub ttl: i64, // Unix timestamp for DynamoDB TTL
+    pub redirect_path: Option<String>,
+}
 
 #[derive(Debug)]
 pub enum CommonError {

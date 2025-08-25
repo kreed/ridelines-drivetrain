@@ -13,6 +13,7 @@ use ridelines_drivetrain::{
     common::{
         intervals_client::{IntervalsClient, OAuthTokenRequest},
         metrics,
+        types::{OAuthState, User},
     },
 };
 use serde::{Deserialize, Serialize};
@@ -112,22 +113,20 @@ async fn handle_login(request: ApiGatewayProxyRequest) -> Result<ApiGatewayProxy
     let state = Uuid::new_v4().to_string();
     let expires_at = Utc::now() + Duration::seconds(STATE_TTL_SECONDS);
 
-    // Store state in DynamoDB with TTL and optional redirect path
-    let mut put_request = dynamodb_client
+    // Store state in DynamoDB with TTL
+    let oauth_state = OAuthState {
+        state: state.clone(),
+        created_at: Utc::now(),
+        ttl: expires_at.timestamp(),
+        redirect_path,
+    };
+
+    dynamodb_client
         .put_item()
         .table_name(&oauth_state_table)
-        .item("state", AttributeValue::S(state.clone()))
-        .item(
-            "expires_at",
-            AttributeValue::N(expires_at.timestamp().to_string()),
-        )
-        .item("created_at", AttributeValue::S(Utc::now().to_rfc3339()));
-
-    if let Some(ref path) = redirect_path {
-        put_request = put_request.item("redirect_path", AttributeValue::S(path.clone()));
-    }
-
-    put_request
+        .set_item(Some(serde_dynamo::to_item(oauth_state).map_err(|e| {
+            Error::from(format!("Failed to serialize OAuth state: {e}"))
+        })?))
         .send()
         .await
         .map_err(|e| Error::from(format!("Failed to store OAuth state: {e}")))?;
@@ -205,34 +204,24 @@ async fn handle_callback(
     let secrets_client = SecretsManagerClient::new(&config);
     let kms_client = KmsClient::new(&config);
 
-    // Verify state parameter
-    let state_result = dynamodb_client
-        .get_item()
-        .table_name(&oauth_state_table)
-        .key("state", AttributeValue::S(params.state.to_string()))
-        .send()
-        .await
-        .map_err(|e| Error::from(format!("Failed to verify OAuth state: {e}")))?;
-
-    let stored_state = state_result.item.ok_or_else(|| {
-        error!("Invalid OAuth state parameter");
-        Error::from("Invalid state parameter")
-    })?;
-
-    // Extract the redirect path if it was stored
-    let stored_redirect_path = stored_state
-        .get("redirect_path")
-        .and_then(|v| v.as_s().ok())
-        .cloned();
-
-    // Delete the state to prevent reuse
-    dynamodb_client
+    // Verify and delete state parameter atomically (prevents reuse)
+    let stored_oauth_state: OAuthState = dynamodb_client
         .delete_item()
         .table_name(&oauth_state_table)
         .key("state", AttributeValue::S(params.state.to_string()))
+        .return_values(aws_sdk_dynamodb::types::ReturnValue::AllOld)
         .send()
         .await
-        .map_err(|e| Error::from(format!("Failed to delete OAuth state: {e}")))?;
+        .map_err(|e| Error::from(format!("Failed to delete OAuth state: {e}")))?
+        .attributes
+        .ok_or_else(|| {
+            error!("Invalid OAuth state parameter");
+            Error::from("Invalid state parameter")
+        })
+        .and_then(|item| {
+            serde_dynamo::from_item(item.clone())
+                .map_err(|e| Error::from(format!("Failed to deserialize OAuth state: {e}")))
+        })?;
 
     // Get OAuth credentials
     let secret_value = secrets_client
@@ -277,45 +266,40 @@ async fn handle_callback(
     let user_id = Uuid::new_v4();
     let now = Utc::now();
 
-    let user = UserProfile {
-        id: user_id,
+    let user = User {
+        id: user_id.to_string(),
         athlete_id: user_profile.id.clone(),
         username: user_profile.username,
         email: user_profile.email,
         created_at: now,
         updated_at: now,
+        last_login: now,
+        intervals_access_token: token_response.access_token.clone(),
     };
 
     // Store user (upsert by athlete_id)
     dynamodb_client
         .put_item()
         .table_name(&users_table)
-        .item("id", AttributeValue::S(user.id.to_string()))
-        .item("athlete_id", AttributeValue::S(user.athlete_id.clone()))
-        .item(
-            "username",
-            AttributeValue::S(user.username.clone().unwrap_or_default()),
-        )
-        .item(
-            "email",
-            AttributeValue::S(user.email.clone().unwrap_or_default()),
-        )
-        .item(
-            "created_at",
-            AttributeValue::S(user.created_at.to_rfc3339()),
-        )
-        .item(
-            "updated_at",
-            AttributeValue::S(user.updated_at.to_rfc3339()),
-        )
-        .item("last_login", AttributeValue::S(Utc::now().to_rfc3339()))
+        .set_item(Some(serde_dynamo::to_item(&user).map_err(|e| {
+            Error::from(format!("Failed to serialize user: {e}"))
+        })?))
         .send()
         .await
         .map_err(|e| Error::from(format!("Failed to store user: {e}")))?;
 
+    let api_user = UserProfile {
+        id: user_id,
+        athlete_id: user.athlete_id.clone(),
+        username: user.username.clone(),
+        email: user.email.clone(),
+        created_at: user.created_at,
+        updated_at: user.updated_at,
+    };
+
     // Generate JWT token
     let jwt_claims = JwtClaims {
-        sub: user.id.to_string(),
+        sub: user.id.clone(),
         athlete_id: user.athlete_id.clone(),
         username: user.username.clone(),
         iat: Utc::now().timestamp(),
@@ -341,8 +325,8 @@ async fn handle_callback(
         body: Some(
             serde_json::to_string(&CallbackResponse {
                 access_token: jwt_token,
-                user,
-                redirect_path: stored_redirect_path,
+                user: api_user,
+                redirect_path: stored_oauth_state.redirect_path,
             })
             .map_err(|e| Error::from(format!("Failed to serialize response: {e}")))?
             .into(),

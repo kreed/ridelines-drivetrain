@@ -41,6 +41,7 @@ lambda_runtime = "0.14.3"
 aws-sdk-s3 = { version = "1.0", default-features = false, features = ["rustls"] }
 aws-sdk-secretsmanager = { version = "1.0", default-features = false, features = ["rustls"] }
 aws-sdk-dynamodb = { version = "1.0", default-features = false, features = ["rustls"] }
+serde_dynamo = { version = "4", features = ["aws-sdk-dynamodb+1"] }
 aws-sdk-kms = { version = "1.0", default-features = false, features = ["rustls"] }
 aws-config = { version = "1.0", default-features = false, features = ["rustls", "rt-tokio"] }
 function-timer = "0.9.2"
