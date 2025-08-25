@@ -45,7 +45,7 @@ paths:
       x-amazon-apigateway-integration:
         type: aws_proxy
         httpMethod: POST
-        uri: "arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/#{auth_lambda_arn}/invocations"
+        uri: "arn:aws:apigateway:$${AWS::Region}:lambda:path/2015-03-31/functions/${auth_lambda_arn}/invocations"
         passthroughBehavior: when_no_match
         contentHandling: CONVERT_TO_TEXT
 
@@ -92,7 +92,7 @@ paths:
       x-amazon-apigateway-integration:
         type: aws_proxy
         httpMethod: POST
-        uri: "arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/#{auth_lambda_arn}/invocations"
+        uri: "arn:aws:apigateway:$${AWS::Region}:lambda:path/2015-03-31/functions/${auth_lambda_arn}/invocations"
         passthroughBehavior: when_no_match
         contentHandling: CONVERT_TO_TEXT
 
@@ -128,7 +128,7 @@ paths:
       x-amazon-apigateway-integration:
         type: aws_proxy
         httpMethod: POST
-        uri: "arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/#{user_lambda_arn}/invocations"
+        uri: "arn:aws:apigateway:$${AWS::Region}:lambda:path/2015-03-31/functions/${user_lambda_arn}/invocations"
         passthroughBehavior: when_no_match
         contentHandling: CONVERT_TO_TEXT
 
@@ -169,7 +169,7 @@ paths:
       x-amazon-apigateway-integration:
         type: aws_proxy
         httpMethod: POST
-        uri: "arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/#{user_lambda_arn}/invocations"
+        uri: "arn:aws:apigateway:$${AWS::Region}:lambda:path/2015-03-31/functions/${user_lambda_arn}/invocations"
         passthroughBehavior: when_no_match
         contentHandling: CONVERT_TO_TEXT
 
@@ -204,7 +204,7 @@ paths:
       x-amazon-apigateway-integration:
         type: aws_proxy
         httpMethod: POST
-        uri: "arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/#{user_lambda_arn}/invocations"
+        uri: "arn:aws:apigateway:$${AWS::Region}:lambda:path/2015-03-31/functions/${user_lambda_arn}/invocations"
         passthroughBehavior: when_no_match
         contentHandling: CONVERT_TO_TEXT
 
@@ -218,7 +218,7 @@ components:
       x-amazon-apigateway-authorizer:
         type: jwt
         jwtConfiguration:
-          issuer: "https://#{domain_name}"
+          issuer: "https://${domain_name}"
           audience:
             - "ridelines-web"
         identitySource: "$request.header.Authorization"
@@ -400,7 +400,7 @@ components:
 # AWS API Gateway CORS configuration
 x-amazon-apigateway-cors:
   allowOrigins:
-    - "#{frontend_origin}"
+    - "${frontend_origin}"
   allowHeaders:
     - "Content-Type"
     - "X-Amz-Date"
