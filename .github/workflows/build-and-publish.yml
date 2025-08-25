@@ -40,6 +40,9 @@ jobs:
         with:
           bins: cargo-lambda
 
+      - name: Setup Rust cache
+        uses: Swatinem/rust-cache@v2
+
       - name: Run tests
         run: cargo test
 
@@ -63,6 +66,9 @@ jobs:
         uses: moonrepo/setup-rust@v1
         with:
           bins: cargo-lambda
+
+      - name: Setup Rust cache
+        uses: Swatinem/rust-cache@v2
 
       - name: Get drivetrain commit SHA
         id: drivetrain_sha
