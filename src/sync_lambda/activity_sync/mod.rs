@@ -1,5 +1,5 @@
-use crate::intervals_client::IntervalsClient;
 use aws_sdk_s3::Client as S3Client;
+use ridelines_drivetrain::common::intervals_client::IntervalsClient;
 
 mod archive;
 mod index;
@@ -17,14 +17,13 @@ pub struct ActivitySync {
 
 impl ActivitySync {
     pub fn new(
-        api_key: &str,
         athlete_id: &str,
         s3_client: S3Client,
         s3_bucket: &str,
         work_dir: &std::path::Path,
     ) -> Self {
         Self {
-            intervals_client: IntervalsClient::new(api_key.to_string()),
+            intervals_client: IntervalsClient::new(),
             s3_client,
             s3_bucket: s3_bucket.to_string(),
             athlete_id: athlete_id.to_string(),

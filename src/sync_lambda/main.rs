@@ -1,20 +1,23 @@
-use aws_lambda_events::event::eventbridge::EventBridgeEvent;
 use lambda_runtime::{Error, LambdaEvent};
 use metrics_cloudwatch_embedded::lambda::handler::run;
+use serde::{Deserialize, Serialize};
 use tracing::info_span;
 
 use aws_config::BehaviorVersion;
-use aws_sdk_cloudfront::Client as CloudFrontClient;
 use aws_sdk_s3::Client as S3Client;
-use aws_sdk_secretsmanager::Client as SecretsManagerClient;
 use function_timer::time;
 use std::env;
 use tempdir::TempDir;
 
+use ridelines_drivetrain::common::metrics;
+
+#[derive(Debug, Deserialize, Serialize)]
+pub struct SyncRequest {
+    pub athlete_id: String,
+}
+
 mod activity_sync;
-mod convert;
-mod intervals_client;
-mod metrics_helper;
+mod fit_converter;
 mod tile_generator;
 
 use crate::activity_sync::ActivitySync;
@@ -31,7 +34,7 @@ async fn main() -> Result<(), Error> {
         .init();
 
     let metrics = metrics_cloudwatch_embedded::Builder::new()
-        .cloudwatch_namespace("IntervalsMapper")
+        .cloudwatch_namespace(metrics::METRICS_NAMESPACE)
         .lambda_cold_start_span(info_span!("cold start"))
         .lambda_cold_start_metric("ColdStart")
         .with_lambda_request_id("RequestId")
@@ -40,28 +43,13 @@ async fn main() -> Result<(), Error> {
     run(metrics, function_handler).await
 }
 
-/// This is the main body for the function.
-/// Write your code inside it.
-/// There are some code example in the following URLs:
-/// - https://github.com/awslabs/aws-lambda-rust-runtime/tree/main/examples
-/// - https://github.com/aws-samples/serverless-rust-demo/
 #[time("lambda_handler_duration")]
-pub(crate) async fn function_handler(event: LambdaEvent<EventBridgeEvent>) -> Result<(), Error> {
+pub(crate) async fn function_handler(event: LambdaEvent<SyncRequest>) -> Result<(), Error> {
     // Extract some useful information from the request
     let (payload, _context) = event.into_parts();
-    tracing::info!("Payload: {:?}", payload);
+    tracing::info!("Sync request: {:?}", payload);
 
-    // Extract athlete_id from the event detail
-    // For now, we'll assume the athlete_id is passed in the detail field
-    let athlete_id = payload
-        .detail
-        .get("athlete_id")
-        .and_then(|v| v.as_str())
-        .ok_or_else(|| Error::from("athlete_id not found in event detail"))?;
-
-    // Get required environment variables
-    let secret_arn = env::var("SECRETS_MANAGER_SECRET_ARN")
-        .map_err(|_| Error::from("SECRETS_MANAGER_SECRET_ARN environment variable not set"))?;
+    let athlete_id = &payload.athlete_id;
 
     let s3_bucket =
         env::var("S3_BUCKET").map_err(|_| Error::from("S3_BUCKET environment variable not set"))?;
@@ -69,52 +57,31 @@ pub(crate) async fn function_handler(event: LambdaEvent<EventBridgeEvent>) -> Re
     // Initialize AWS SDK
     let config = aws_config::load_defaults(BehaviorVersion::latest()).await;
     let s3_client = S3Client::new(&config);
-    let cloudfront_client = CloudFrontClient::new(&config);
-    let secrets_client = SecretsManagerClient::new(&config);
-
-    // Retrieve API key from Secrets Manager
-    let secret_value = secrets_client
-        .get_secret_value()
-        .secret_id(&secret_arn)
-        .send()
-        .await
-        .map_err(|e| Error::from(format!("Failed to retrieve secret: {e}")))?;
-
-    let api_key = secret_value
-        .secret_string()
-        .ok_or_else(|| Error::from("Secret string not found"))?;
 
     // Create shared work directory for all temporary files
     let work_dir = TempDir::new(&format!("intervals_mapper_{athlete_id}"))
         .map_err(|e| Error::from(format!("Failed to create work directory: {e}")))?;
 
     // Sync activities and get path to concatenated GeoJSON file
-    let sync_job = ActivitySync::new(
-        api_key,
-        athlete_id,
-        s3_client.clone(),
-        &s3_bucket,
-        work_dir.path(),
-    );
+    let sync_job = ActivitySync::new(athlete_id, s3_client.clone(), &s3_bucket, work_dir.path());
 
     let geojson_file_path = match sync_job.sync_activities().await {
         Ok(Some(path)) => path,
         Ok(None) => {
             // No changes detected, skip tile generation
             tracing::info!("No activity changes detected, Lambda execution completed successfully");
-            metrics_helper::increment_lambda_success();
+            metrics::increment_lambda_success();
             return Ok(());
         }
         Err(e) => {
-            metrics_helper::increment_lambda_failure();
+            metrics::increment_lambda_failure();
             return Err(Error::from(format!("Sync failed: {e}")));
         }
     };
 
     // Generate PMTiles from the concatenated GeoJSON file
-    let tile_generator =
-        TileGenerator::new(s3_client, cloudfront_client, athlete_id.to_string())
-            .map_err(|e| Error::from(format!("Failed to create TileGenerator: {e}")))?;
+    let tile_generator = TileGenerator::new(s3_client, athlete_id.to_string())
+        .map_err(|e| Error::from(format!("Failed to create TileGenerator: {e}")))?;
 
     let tile_result = tile_generator
         .generate_pmtiles_from_file(&geojson_file_path.to_string_lossy())
@@ -125,11 +92,11 @@ pub(crate) async fn function_handler(event: LambdaEvent<EventBridgeEvent>) -> Re
 
     if let Err(e) = tile_result {
         tracing::error!("Failed to generate PMTiles: {}", e);
-        metrics_helper::increment_lambda_failure();
+        metrics::increment_lambda_failure();
         return Err(Error::from(format!("PMTiles generation failed: {e}")));
     }
 
     // Record successful Lambda execution
-    metrics_helper::increment_lambda_success();
+    metrics::increment_lambda_success();
     Ok(())
 }

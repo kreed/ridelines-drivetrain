@@ -1,5 +1,7 @@
 use metrics::{counter, gauge};
 
+pub const METRICS_NAMESPACE: &str = "ridelines";
+
 /// Error/Reliability Metrics - Success/Failure pairs
 pub fn increment_intervals_api_success() {
     counter!("intervals_api_total", "result" => "success").increment(1);

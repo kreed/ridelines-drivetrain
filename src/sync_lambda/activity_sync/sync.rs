@@ -1,10 +1,10 @@
 use super::{ActivityIndex, ActivitySync};
-use crate::convert::convert_fit_to_geojson;
-use crate::intervals_client::Activity;
-use crate::metrics_helper;
+use crate::fit_converter::convert_fit_to_geojson;
 use anyhow::Result;
 use function_timer::time;
 use futures::stream::{self, StreamExt};
+use ridelines_drivetrain::common::intervals_client::Activity;
+use ridelines_drivetrain::common::metrics;
 use tracing::{error, info};
 
 impl ActivitySync {
@@ -42,7 +42,7 @@ impl ActivitySync {
 
                 for activity in &activities {
                     if existing.try_copy(activity, &mut copied) {
-                        metrics_helper::increment_activities_skipped_unchanged(1);
+                        metrics::increment_activities_skipped_unchanged(1);
                     } else {
                         // Activity is new or changed, add to parallel processing queue
                         changed.push(activity.clone());
@@ -133,8 +133,8 @@ impl ActivitySync {
                 ));
                 match std::fs::write(&temp_file_path, &geojson) {
                     Ok(_) => {
-                        metrics_helper::increment_activities_with_gps(1);
-                        metrics_helper::increment_activities_downloaded_new(1);
+                        metrics::increment_activities_with_gps(1);
+                        metrics::increment_activities_downloaded_new(1);
                         info!("Saved GeoJSON to: {}", temp_file_path.display());
                     }
                     Err(e) => {
@@ -142,7 +142,7 @@ impl ActivitySync {
                             "Failed to write activity {} to temp file: {}",
                             activity.id, e
                         );
-                        metrics_helper::increment_activities_failed(1);
+                        metrics::increment_activities_failed(1);
                     }
                 }
             }
@@ -153,18 +153,18 @@ impl ActivitySync {
 
                 match std::fs::write(&stub_file_path, "") {
                     Ok(_) => {
-                        metrics_helper::increment_activities_without_gps(1);
+                        metrics::increment_activities_without_gps(1);
                         info!("Saved empty stub to: {}", stub_file_path.display());
                     }
                     Err(e) => {
                         error!("Failed to write stub for activity {}: {}", activity.id, e);
-                        metrics_helper::increment_activities_failed(1);
+                        metrics::increment_activities_failed(1);
                     }
                 }
             }
             Err(e) => {
                 error!("Failed to download/convert activity {}: {}", activity.id, e);
-                metrics_helper::increment_activities_failed(1);
+                metrics::increment_activities_failed(1);
             }
         }
 

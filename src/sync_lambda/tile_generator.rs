@@ -1,10 +1,8 @@
-use crate::metrics_helper;
 use anyhow::{Context, Result};
-use aws_sdk_cloudfront::Client as CloudFrontClient;
 use aws_sdk_s3::Client as S3Client;
 use aws_sdk_s3::primitives::ByteStream;
-use chrono::Utc;
 use function_timer::time;
+use ridelines_drivetrain::common::metrics;
 use std::env;
 use std::process::Command;
 use tokio::fs;
@@ -12,29 +10,19 @@ use tracing::{error, info};
 
 pub struct TileGenerator {
     s3_client: S3Client,
-    cloudfront_client: CloudFrontClient,
     athlete_id: String,
     activities_bucket: String,
-    cloudfront_distribution_id: String,
 }
 
 impl TileGenerator {
-    pub fn new(
-        s3_client: S3Client,
-        cloudfront_client: CloudFrontClient,
-        athlete_id: String,
-    ) -> Result<Self> {
+    pub fn new(s3_client: S3Client, athlete_id: String) -> Result<Self> {
         let activities_bucket = env::var("ACTIVITIES_S3_BUCKET")
             .context("ACTIVITIES_S3_BUCKET environment variable not set")?;
-        let cloudfront_distribution_id = env::var("CLOUDFRONT_DISTRIBUTION_ID")
-            .context("CLOUDFRONT_DISTRIBUTION_ID environment variable not set")?;
 
         Ok(Self {
             s3_client,
-            cloudfront_client,
             athlete_id,
             activities_bucket,
-            cloudfront_distribution_id,
         })
     }
 
@@ -54,9 +42,6 @@ impl TileGenerator {
 
         // Phase 2: Upload PMTiles to S3 (timed)
         self.upload_pmtiles(&temp_pmtiles_file).await?;
-
-        // Phase 3: Invalidate CloudFront cache
-        self.invalidate_cloudfront_cache().await?;
 
         // Clean up temp files
         let _ = fs::remove_file(&temp_pmtiles_file).await;
@@ -86,7 +71,7 @@ impl TileGenerator {
             error!("Tippecanoe failed with status: {}", output.status);
             error!("Stderr: {}", stderr);
             error!("Stdout: {}", stdout);
-            metrics_helper::increment_tippecanoe_failure();
+            metrics::increment_tippecanoe_failure();
             return Err(anyhow::anyhow!("Tippecanoe failed: {stderr}"));
         }
 
@@ -95,7 +80,7 @@ impl TileGenerator {
             info!("Tippecanoe output: {}", stdout);
         }
 
-        metrics_helper::increment_tippecanoe_success();
+        metrics::increment_tippecanoe_success();
         Ok(())
     }
 
@@ -109,7 +94,7 @@ impl TileGenerator {
             .context("Failed to read PMTiles file")?;
 
         // Record PMTiles file size
-        metrics_helper::record_pmtiles_file_size(file_content.len() as u64);
+        metrics::record_pmtiles_file_size(file_content.len() as u64);
 
         // Upload to activities S3 bucket with new path structure
         let s3_key = format!("activities/{}.pmtiles", self.athlete_id);
@@ -125,58 +110,13 @@ impl TileGenerator {
             .await
         {
             Ok(_) => {
-                metrics_helper::increment_s3_upload_success();
+                metrics::increment_s3_upload_success();
                 info!("Successfully uploaded PMTiles to activities S3: {}", s3_key);
                 Ok(())
             }
             Err(e) => {
-                metrics_helper::increment_s3_upload_failure();
+                metrics::increment_s3_upload_failure();
                 Err(anyhow::anyhow!("Failed to upload PMTiles to S3: {e}"))
-            }
-        }
-    }
-
-    #[time("cloudfront_invalidation_duration")]
-    async fn invalidate_cloudfront_cache(&self) -> Result<()> {
-        info!(
-            "Invalidating CloudFront cache for athlete {}",
-            self.athlete_id
-        );
-
-        let invalidation_path = format!("/activities/{}.pmtiles", self.athlete_id);
-
-        match self
-            .cloudfront_client
-            .create_invalidation()
-            .distribution_id(&self.cloudfront_distribution_id)
-            .invalidation_batch(
-                aws_sdk_cloudfront::types::InvalidationBatch::builder()
-                    .paths(
-                        aws_sdk_cloudfront::types::Paths::builder()
-                            .quantity(1)
-                            .items(invalidation_path.clone())
-                            .build()
-                            .context("Failed to build invalidation paths")?,
-                    )
-                    .caller_reference(format!("{}-{}", self.athlete_id, Utc::now().timestamp()))
-                    .build()
-                    .context("Failed to build invalidation batch")?,
-            )
-            .send()
-            .await
-        {
-            Ok(response) => {
-                info!(
-                    "Successfully created CloudFront invalidation: {:?}",
-                    response.invalidation().unwrap().id()
-                );
-                Ok(())
-            }
-            Err(e) => {
-                error!("Failed to create CloudFront invalidation: {}", e);
-                Err(anyhow::anyhow!(
-                    "Failed to invalidate CloudFront cache: {e}"
-                ))
             }
         }
     }

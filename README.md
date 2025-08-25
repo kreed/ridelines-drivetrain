@@ -1,6 +1,6 @@
 # Ridelines Drivetrain
 
-A high-performance Rust AWS Lambda service for processing GPS activity data from intervals.icu. The drivetrain efficiently converts FIT files to GeoJSON, generates optimized PMTiles, and manages the complete data processing pipeline with smart synchronization and cloud-native architecture.
+A high-performance Rust AWS Lambda package for multi-user GPS activity processing from intervals.icu. The drivetrain provides three specialized Lambda functions: OAuth authentication, protected user APIs, and activity sync processing. Built for speed, security, and scalability with OAuth 2.0 integration.
 
 ## Overview
 
@@ -8,28 +8,46 @@ Ridelines Drivetrain is the backend powerhouse of the Ridelines ecosystem, built
 
 ### Key Features
 
+- **🔐 OAuth 2.0 Authentication**: Secure intervals.icu integration with JWT tokens
+- **👥 Multi-User Support**: User-specific activity processing and PMTiles
 - **🚀 High-Performance FIT Processing**: Convert Garmin FIT files to GeoJSON with gap detection
 - **🧠 Smart Synchronization**: Hash-based change detection for incremental updates
 - **🗺️ PMTiles Generation**: Create optimized vector tiles using Tippecanoe
-- **☁️ AWS Native**: Built for Lambda with comprehensive monitoring
+- **🛡️ Protected APIs**: JWT-secured endpoints via API Gateway
+- **☁️ AWS Native**: Three specialized Lambda functions with comprehensive monitoring
 - **🔄 Automatic Cache Management**: CloudFront invalidation for instant updates
 - **📊 4-Phase Sync Workflow**: Robust, resumable processing pipeline
-- **⚡ Concurrent Processing**: Optimized for handling large activity datasets
 
 ## Architecture
 
-### Core Components
+### Lambda Functions
+
+The drivetrain package provides three specialized Lambda functions:
+
+| Function | Binary | Purpose | Trigger |
+|----------|--------|---------|---------|
+| **auth-lambda** | `auth_lambda` | OAuth flow, JWT generation | API Gateway `/auth/*` |
+| **user-lambda** | `user_lambda` | Protected APIs, user profiles | API Gateway `/api/*` |
+| **sync-lambda** | `sync_lambda` | Activity download, PMTiles generation (async) | Direct invocation |
+
+### System Architecture
 
 ```
 ┌─────────────────┐    ┌──────────────────┐    ┌─────────────────┐
-│   EventBridge   │───▶│  Lambda Function │───▶│   S3 Storage    │
-│   (Trigger)     │    │  (Rust Runtime)  │    │  (PMTiles)      │
+│   Frontend      │───▶│   API Gateway    │───▶│   auth-lambda   │
+│   (Hub)         │    │  (JWT Authorizer)│    │  (OAuth Flow)   │
 └─────────────────┘    └──────────────────┘    └─────────────────┘
-                                │
-                                ▼
+                                │                        │
+                                ▼                        ▼
                        ┌──────────────────┐    ┌─────────────────┐
-                       │ intervals.icu API│───▶│   CloudFront    │
-                       │   (Data Source)  │    │  (Distribution) │
+                       │   user-lambda    │───▶│   sync-lambda   │
+                       │ (Protected APIs) │    │ (FIT Processing)│
+                       └──────────────────┘    └─────────────────┘
+                                │                        │
+                                ▼                        ▼
+                       ┌──────────────────┐    ┌─────────────────┐
+                       │   DynamoDB       │    │   S3 + CDN      │
+                       │ (Users/State)    │    │  (PMTiles)      │
                        └──────────────────┘    └─────────────────┘
 ```
 
@@ -51,19 +69,26 @@ Ridelines Drivetrain is the backend powerhouse of the Ridelines ecosystem, built
 - **Features**: Custom layer integration, optimized settings, compression
 - **Output**: Production-ready vector tiles for web mapping
 
-#### **intervals.icu Client** (`src/intervals_client.rs`)
-- **Purpose**: Secure API integration with intervals.icu
-- **Features**: Authentication, rate limiting, error handling
-- **Security**: AWS Secrets Manager integration for API keys
+#### **intervals.icu Client** (`src/common/intervals_client.rs`)
+- **Purpose**: OAuth-enabled API integration with intervals.icu
+- **Features**: OAuth token handling, user profile fetching, activity API
+- **Security**: Access token validation, error handling
 
 ### Data Processing Flow
 
-1. **📡 Event Trigger**: EventBridge event with athlete ID
-2. **📋 Activity List**: Fetch from intervals.icu API
+#### OAuth Authentication Flow
+1. **🔐 Login**: User initiates OAuth with intervals.icu
+2. **🔑 Token Exchange**: Exchange authorization code for access token  
+3. **👤 Profile**: Fetch user profile and athlete ID
+4. **🎫 JWT**: Generate signed JWT token for frontend
+
+#### Activity Sync Flow
+1. **📡 API Trigger**: User-lambda invokes sync-lambda with SyncRequest
+2. **📋 Activity List**: Fetch user activities using OAuth token
 3. **🔍 Change Detection**: Compare hashes to identify updates
 4. **📥 FIT Download**: Concurrent download of modified activities
 5. **🔄 GeoJSON Conversion**: Process FIT files with gap detection
-6. **🗺️ Tile Generation**: Create PMTiles using Tippecanoe
+6. **🗺️ Tile Generation**: Create user-specific PMTiles using Tippecanoe
 7. **☁️ Cloud Deployment**: Upload to S3 and invalidate CloudFront
 
 ## Technology Stack
@@ -84,7 +109,6 @@ Ridelines Drivetrain is the backend powerhouse of the Ridelines ecosystem, built
 
 - **Rust**: 1.82+ with Cargo
 - **Cargo Lambda**: For AWS Lambda development
-- **Zig**: 0.14.1+ for cross-compilation to Linux
 - **AWS CLI**: Configured with appropriate permissions
 - **OpenTofu/Terraform**: For infrastructure management
 
@@ -95,12 +119,10 @@ Ridelines Drivetrain is the backend powerhouse of the Ridelines ecosystem, built
    cargo install cargo-lambda
    ```
 
-2. **Install Zig** (required for cross-compilation):
+2. **Install Zig** (optional, for cross-compilation if not building on Linux):
    ```bash
    # macOS with Homebrew
    brew install zig
-   
-   # Linux/Windows: Download from https://ziglang.org/
    ```
 
 3. **Clone and build**:
@@ -114,21 +136,27 @@ Ridelines Drivetrain is the backend powerhouse of the Ridelines ecosystem, built
 
 | Command | Description |
 |---------|-------------|
-| `cargo build` | Build for local development |
+| `cargo build` | Build all Lambda functions for local development |
+| `cargo build --bin sync_lambda` | Build sync Lambda only |
+| `cargo build --bin auth_lambda` | Build auth Lambda only |
+| `cargo build --bin user_lambda` | Build user Lambda only |
 | `cargo test` | Run test suite |
 | `cargo clippy` | Run Rust linter |
 | `cargo fmt` | Format code |
-| `cargo lambda build --release` | Build Lambda deployment package |
-| `cargo lambda watch` | Local development with hot reload |
+| `cargo lambda build --release` | Build all Lambda deployment packages |
+| `cargo lambda build --release --bin sync_lambda` | Build sync Lambda package |
 
 ### Local Development
 
 ```bash
-# Build for Lambda environment
+# Build all Lambda functions for Lambda environment
 cargo lambda build --release
 
-# Start local development server
-cargo lambda watch
+# Build specific Lambda function
+cargo lambda build --release --bin auth_lambda
+
+# Start local development server (sync lambda)
+cargo lambda watch --bin sync_lambda
 
 # Run tests with coverage
 cargo test -- --nocapture
@@ -142,71 +170,70 @@ cargo fmt --check
 
 ### Environment Variables
 
-The Lambda function uses these environment variables (configured via infrastructure):
+Each Lambda function uses these environment variables (configured via infrastructure):
 
+#### Auth Lambda
 ```bash
-# Required
-INTERVALS_ICU_API_KEY_SECRET_ARN=arn:aws:secretsmanager:region:account:secret:name
-ACTIVITIES_S3_BUCKET_NAME=your-activities-bucket
-ATHLETE_STATE_S3_BUCKET_NAME=your-state-bucket  
-CLOUDFRONT_DISTRIBUTION_ID=YOUR_DISTRIBUTION_ID
+OAUTH_CREDENTIALS_SECRET_ARN=arn:aws:secretsmanager:region:account:secret:name
+JWT_KMS_KEY_ID=alias/ridelines-jwt
+USERS_TABLE_NAME=ridelines-users
+OAUTH_STATE_TABLE_NAME=ridelines-oauth-state
+FRONTEND_URL=https://ridelines.xyz
+```
 
-# Optional
+#### User Lambda  
+```bash
+USERS_TABLE_NAME=ridelines-users
+JWT_KMS_KEY_ID=alias/ridelines-jwt
+SYNC_LAMBDA_FUNCTION_NAME=ridelines-sync-lambda
+```
+
+#### Sync Lambda
+```bash
+S3_BUCKET=your-geojson-bucket
+CLOUDFRONT_DISTRIBUTION_ID=YOUR_DISTRIBUTION_ID
 RUST_LOG=info                    # Logging level
 TIPPECANOE_ARGS="--drop-rate=0"  # Custom Tippecanoe settings
 ```
 
-### intervals.icu API Setup
+### intervals.icu OAuth Setup
 
-1. **Generate API Key**: Visit intervals.icu settings to create an API key
-2. **Store in Secrets Manager**:
+1. **Register OAuth App**: Visit intervals.icu settings to create OAuth application
+2. **Store Credentials in Secrets Manager**:
    ```bash
    aws secretsmanager create-secret \
-     --name "ridelines-intervals-api-key" \
-     --description "API key for intervals.icu integration" \
-     --secret-string "your-api-key-here"
+     --name "ridelines-oauth-credentials" \
+     --description "OAuth credentials for intervals.icu integration" \
+     --secret-string '{"client_id":"your-client-id","client_secret":"your-client-secret"}'
    ```
-
-### Event Trigger Format
-
-Trigger the Lambda function via EventBridge with this event structure:
-
-```json
-{
-  "source": "ridelines.sync",
-  "detail-type": "Activity Sync Request",
-  "detail": {
-    "athlete_id": "i351926",
-    "force_sync": false
-  }
-}
-```
 
 ## Project Structure
 
 ```
 drivetrain/
 ├── src/
-│   ├── main.rs                    # Lambda entry point and runtime
-│   ├── activity_sync/             # Core synchronization logic
-│   │   ├── mod.rs                # Module exports
-│   │   ├── sync.rs               # 4-phase sync implementation
-│   │   ├── archive.rs            # ActivityIndex binary format
-│   │   └── index.rs              # Efficient binary operations
-│   ├── intervals_client.rs       # intervals.icu API client
-│   ├── convert.rs                # FIT to GeoJSON conversion
-│   ├── tile_generator.rs         # PMTiles generation with Tippecanoe
-│   └── metrics_helper.rs         # CloudWatch metrics integration
+│   ├── lib.rs                     # Module declarations
+│   ├── common/                    # Shared modules for all Lambda functions
+│   │   ├── aws.rs                # AWS client configurations
+│   │   ├── intervals_client.rs   # OAuth-enabled intervals.icu client
+│   │   ├── metrics.rs            # CloudWatch metrics integration
+│   │   ├── models.rs             # Shared data models
+│   │   └── error.rs              # Common error types
+│   ├── auth_lambda/              # OAuth authentication Lambda
+│   │   └── main.rs               # OAuth login and callback handlers
+│   ├── user_lambda/              # Protected user API Lambda
+│   │   └── main.rs               # User profile and sync trigger APIs
+│   ├── sync_lambda/              # Activity processing Lambda
+│   │   ├── main.rs               # Lambda entry point
+│   │   ├── activity_sync/        # Core synchronization logic
+│   │   │   ├── mod.rs           # Module exports
+│   │   │   ├── sync.rs          # 4-phase sync implementation
+│   │   │   ├── archive.rs       # ActivityIndex binary format
+│   │   │   └── index.rs         # Efficient binary operations
+│   │   ├── fit_converter.rs     # FIT to GeoJSON conversion
+│   │   └── tile_generator.rs    # PMTiles generation with Tippecanoe
 ├── tests/                        # Integration and unit tests
-├── terraform/                    # Infrastructure as Code
-│   ├── main.tf                  # Lambda function and permissions
-│   ├── variables.tf             # Configuration variables
-│   └── outputs.tf               # Resource outputs
-├── .github/workflows/            # CI/CD automation
-│   ├── build-and-test.yml      # Test and lint on PR
-│   ├── deploy-lambda.yml       # Deploy to AWS
-│   └── build-layer.yml         # Tippecanoe layer build
-├── Cargo.toml                   # Rust dependencies and config
+├── Cargo.toml                   # Multiple binary targets and dependencies
 ├── Cargo.lock                   # Dependency lock file
 └── README.md                    # This file
 ```
@@ -254,7 +281,7 @@ The service emits comprehensive metrics:
   "timestamp": "2024-01-15T10:30:00Z",
   "level": "INFO",
   "target": "drivetrain::activity_sync",
-  "athlete_id": "i351926",
+  "athlete_id": "i123",
   "phase": "download",
   "activities_processed": 15,
   "duration_ms": 2341
@@ -295,43 +322,12 @@ cargo test --test integration
 
 ## Deployment
 
-### Infrastructure Deployment
-
-```bash
-cd terraform
-tofu init
-tofu plan -var="api_key_secret_name=your-secret-name"
-tofu apply
-```
-
 ### CI/CD Pipeline
 
-The project uses GitHub Actions for automated deployment:
-
-1. **Pull Request**: Run tests and linting
-2. **Main Branch**: Build and deploy Lambda package
-3. **Release**: Deploy infrastructure updates
-
-### Manual Deployment
-
-```bash
-# Build release package
-cargo lambda build --release
-
-# Deploy with AWS CLI
-aws lambda update-function-code \
-  --function-name ridelines-drivetrain \
-  --zip-file fileb://target/lambda/bootstrap/bootstrap.zip
-```
+The project uses GitHub Actions for automated deployment. A workflow in this repository builds a drivetrain package and then
+kicks off a deployment through [ridelines-frame](https://github.com/kreed/ridelines-frame/).
 
 ## Troubleshooting
-
-### Common Issues
-
-1. **Build Failures**: Ensure Zig is installed for cross-compilation
-2. **Memory Errors**: Increase Lambda memory if processing large datasets
-3. **API Rate Limits**: Check intervals.icu API quotas and implement backoff
-4. **S3 Permissions**: Verify Lambda execution role has bucket access
 
 ### Debug Mode
 
@@ -354,42 +350,6 @@ cargo build --release --features profiling
 # Run with CPU profiling
 CARGO_PROFILE_RELEASE_DEBUG=true cargo lambda build --release
 ```
-
-## Contributing
-
-We welcome contributions! Please follow these guidelines:
-
-### Development Process
-
-1. **Fork** the repository
-2. **Create** a feature branch: `git checkout -b feature/awesome-feature`
-3. **Write** tests for new functionality
-4. **Run** the test suite: `cargo test`
-5. **Lint** the code: `cargo clippy`
-6. **Format** the code: `cargo fmt`
-7. **Commit** changes: `git commit -m 'Add awesome feature'`
-8. **Push** to branch: `git push origin feature/awesome-feature`
-9. **Open** a Pull Request
-
-### Code Standards
-
-- **Rust Style**: Follow `rustfmt` defaults
-- **Error Handling**: Use `Result` types, avoid `panic!`
-- **Documentation**: Add doc comments for public APIs
-- **Testing**: Write tests for new functionality
-- **Performance**: Consider memory usage and execution time
-
-## Security
-
-- **API Keys**: Stored in AWS Secrets Manager, never in code
-- **IAM Roles**: Principle of least privilege
-- **Network**: VPC isolation for sensitive operations
-- **Input Validation**: All external data validated and sanitized
-- **Audit Logs**: Comprehensive CloudWatch logging
-
-## License
-
-This project is licensed under the MIT License - see the [LICENSE](../LICENSE) file for details.
 
 ## Links
 

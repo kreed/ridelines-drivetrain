@@ -1,9 +1,9 @@
 use super::{ActivityIndex, ActivitySync};
-use crate::metrics_helper;
 use anyhow::Result;
 use aws_sdk_s3::primitives::ByteStream;
 use function_timer::time;
 use geojson::FeatureCollection;
+use ridelines_drivetrain::common::metrics;
 use std::fs::File;
 use std::io::{BufRead, BufReader, Read, Write};
 use tracing::{error, info};
@@ -203,7 +203,7 @@ impl ActivitySync {
             .await
         {
             Ok(response) => {
-                metrics_helper::increment_s3_upload_success();
+                metrics::increment_s3_upload_success();
                 let index_data = response.body.collect().await?.to_vec();
 
                 // Deserialize
@@ -218,7 +218,7 @@ impl ActivitySync {
                 Ok(index)
             }
             Err(e) => {
-                metrics_helper::increment_s3_upload_failure();
+                metrics::increment_s3_upload_failure();
                 Err(e.into())
             }
         }
@@ -237,7 +237,7 @@ impl ActivitySync {
         let serialized_data = bincode::encode_to_vec(index, bincode::config::standard())?;
 
         // Record index size metrics
-        metrics_helper::record_index_size_bytes(serialized_data.len() as u64);
+        metrics::record_index_size_bytes(serialized_data.len() as u64);
 
         // Upload to S3
         let index_key = format!("athletes/{}/activities.index", index.athlete_id);
@@ -252,12 +252,12 @@ impl ActivitySync {
             .await
         {
             Ok(_) => {
-                metrics_helper::increment_s3_upload_success();
+                metrics::increment_s3_upload_success();
                 info!("Index saved to S3: {}", index_key);
                 Ok(())
             }
             Err(e) => {
-                metrics_helper::increment_s3_upload_failure();
+                metrics::increment_s3_upload_failure();
                 error!("Failed to save index to S3: {}", e);
                 Err(e.into())
             }
@@ -299,8 +299,8 @@ impl ActivitySync {
 
         // Record compression metrics
         let compression_ratio = compressed_data.len() as f64 / file_content.len() as f64;
-        metrics_helper::record_archive_compression_ratio(compression_ratio);
-        metrics_helper::record_archive_size_bytes(compressed_data.len() as u64);
+        metrics::record_archive_compression_ratio(compression_ratio);
+        metrics::record_archive_size_bytes(compressed_data.len() as u64);
 
         info!(
             "GeoJSON compressed from {} to {} bytes (ratio: {:.2})",

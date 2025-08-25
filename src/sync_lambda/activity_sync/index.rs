@@ -1,4 +1,4 @@
-use crate::intervals_client::Activity;
+use ridelines_drivetrain::common::intervals_client::Activity;
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
 

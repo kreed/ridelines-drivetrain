@@ -86,9 +86,11 @@ fn split_coordinates_on_gaps(coords: Vec<Vec<f64>>, max_gap_meters: f64) -> Vec<
     segments
 }
 
+use ridelines_drivetrain::common::intervals_client::Activity;
+
 pub async fn convert_fit_to_geojson(
     fit_data: &[u8],
-    activity: &crate::intervals_client::Activity,
+    activity: &Activity,
 ) -> Result<Option<String>> {
     // Parse FIT data
     let fit_data_records = fitparser::from_bytes(fit_data)?;

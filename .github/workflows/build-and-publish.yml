@@ -78,7 +78,9 @@ jobs:
         run: |
           cat > Dockerfile.lambda << 'EOF'
           FROM scratch
-          COPY target/lambda/ridelines-drivetrain/bootstrap.zip /lambda-package.zip
+          COPY target/lambda/auth_lambda/bootstrap.zip /auth-lambda-package.zip
+          COPY target/lambda/user_lambda/bootstrap.zip /user-lambda-package.zip
+          COPY target/lambda/sync_lambda/bootstrap.zip /sync-lambda-package.zip
           EOF
 
       - name: Log in to Container Registry
@@ -128,7 +130,10 @@ jobs:
       - name: Lambda package summary
         run: |
           echo "## Lambda Package Build Summary" >> $GITHUB_STEP_SUMMARY
-          echo "✅ Lambda function built successfully" >> $GITHUB_STEP_SUMMARY
+          echo "✅ All Lambda functions built successfully:" >> $GITHUB_STEP_SUMMARY
+          echo "  - auth-lambda (OAuth flow)" >> $GITHUB_STEP_SUMMARY
+          echo "  - user-lambda (Protected APIs)" >> $GITHUB_STEP_SUMMARY
+          echo "  - sync-lambda (Activity processing)" >> $GITHUB_STEP_SUMMARY
           echo "✅ Container image published to registry" >> $GITHUB_STEP_SUMMARY
           echo "📦 Package: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}" >> $GITHUB_STEP_SUMMARY
           echo "🏷️ Tags: " >> $GITHUB_STEP_SUMMARY
