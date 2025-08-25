@@ -35,10 +35,11 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v5
 
-      - name: Install Rust toolchain with Cargo Lambda
-        uses: moonrepo/setup-rust@v1
-        with:
-          bins: cargo-lambda
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install cargo-lambda
+        uses: taiki-e/install-action@cargo-lambda
 
       - name: Setup Rust cache
         uses: Swatinem/rust-cache@v2
@@ -62,10 +63,11 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v5
 
-      - name: Install Rust toolchain with Cargo Lambda
-        uses: moonrepo/setup-rust@v1
-        with:
-          bins: cargo-lambda
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install cargo-lambda
+        uses: taiki-e/install-action@cargo-lambda
 
       - name: Setup Rust cache
         uses: Swatinem/rust-cache@v2
