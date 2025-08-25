@@ -53,8 +53,11 @@ fn main() {
     // Generate the Rust code
     let generated_code = type_space.to_stream().to_string();
 
+    // Wrap generated code in a module with clippy allow directive
+    let final_code = format!("#[allow(clippy::all)]\npub mod generated {{\n{generated_code}\n}}");
+
     // Write the generated types to the output file
-    fs::write(&dest_path, generated_code)
+    fs::write(&dest_path, final_code)
         .expect("Failed to write generated types");
 
     println!("Generated API types at: {}", dest_path.display());
