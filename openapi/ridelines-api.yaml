@@ -42,6 +42,12 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
+      x-amazon-apigateway-integration:
+        type: aws_proxy
+        httpMethod: POST
+        uri: "arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/#{auth_lambda_arn}/invocations"
+        passthroughBehavior: when_no_match
+        contentHandling: CONVERT_TO_TEXT
 
   /auth/callback:
     get:
@@ -83,6 +89,12 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
+      x-amazon-apigateway-integration:
+        type: aws_proxy
+        httpMethod: POST
+        uri: "arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/#{auth_lambda_arn}/invocations"
+        passthroughBehavior: when_no_match
+        contentHandling: CONVERT_TO_TEXT
 
   # Protected endpoints (require JWT authentication)
   /api/user:
@@ -113,6 +125,12 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
+      x-amazon-apigateway-integration:
+        type: aws_proxy
+        httpMethod: POST
+        uri: "arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/#{user_lambda_arn}/invocations"
+        passthroughBehavior: when_no_match
+        contentHandling: CONVERT_TO_TEXT
 
   /api/sync:
     post:
@@ -148,6 +166,12 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
+      x-amazon-apigateway-integration:
+        type: aws_proxy
+        httpMethod: POST
+        uri: "arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/#{user_lambda_arn}/invocations"
+        passthroughBehavior: when_no_match
+        contentHandling: CONVERT_TO_TEXT
 
   /api/sync/status:
     get:
@@ -177,6 +201,12 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
+      x-amazon-apigateway-integration:
+        type: aws_proxy
+        httpMethod: POST
+        uri: "arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/#{user_lambda_arn}/invocations"
+        passthroughBehavior: when_no_match
+        contentHandling: CONVERT_TO_TEXT
 
 components:
   securitySchemes:
@@ -185,6 +215,13 @@ components:
       scheme: bearer
       bearerFormat: JWT
       description: JWT token obtained from /auth/callback
+      x-amazon-apigateway-authorizer:
+        type: jwt
+        jwtConfiguration:
+          issuer: "https://#{domain_name}"
+          audience:
+            - "ridelines-web"
+        identitySource: "$request.header.Authorization"
 
   schemas:
     # Request Parameter Types
@@ -359,6 +396,22 @@ components:
           nullable: true
           description: Additional error details
           example: "State parameter not found or expired"
+
+# AWS API Gateway CORS configuration
+x-amazon-apigateway-cors:
+  allowOrigins:
+    - "#{frontend_origin}"
+  allowHeaders:
+    - "Content-Type"
+    - "X-Amz-Date"
+    - "Authorization"
+    - "X-Api-Key"
+    - "X-Amz-Security-Token"
+  allowMethods:
+    - "GET"
+    - "POST"
+    - "OPTIONS"
+  allowCredentials: false
 
 tags:
   - name: Authentication
