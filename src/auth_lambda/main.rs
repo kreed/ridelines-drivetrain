@@ -1,20 +1,368 @@
+use aws_config::BehaviorVersion;
+use aws_lambda_events::apigw::{ApiGatewayProxyRequest, ApiGatewayProxyResponse};
+use aws_lambda_events::http::HeaderMap;
+use aws_sdk_dynamodb::Client as DynamoDBClient;
+use aws_sdk_dynamodb::types::AttributeValue;
+use aws_sdk_kms::Client as KmsClient;
+use aws_sdk_secretsmanager::Client as SecretsManagerClient;
+use chrono::{Duration, Utc};
 use lambda_runtime::{Error, LambdaEvent};
 use metrics_cloudwatch_embedded::lambda::handler::run;
-use ridelines_drivetrain::common::metrics;
-use serde_json::{Value, json};
-use tracing::info_span;
+use ridelines_drivetrain::common::{
+    intervals_client::{IntervalsClient, OAuthTokenRequest},
+    metrics,
+};
+use serde::{Deserialize, Serialize};
+use serde_json::json;
+use std::env;
+use tracing::{error, info, info_span};
+use uuid::Uuid;
 
-async fn function_handler(_event: LambdaEvent<Value>) -> Result<Value, Error> {
-    Ok(json!({
-        "statusCode": 200,
-        "body": json!({
-            "message": "Auth Lambda placeholder - handles OAuth flow",
-            "endpoints": [
-                "POST /auth/login - Initiates OAuth flow with intervals.icu",
-                "GET /auth/callback - Handles OAuth callback and generates JWT"
-            ]
-        }).to_string()
-    }))
+mod jwt;
+use jwt::{JwtClaims, generate_jwt_token};
+
+const OAUTH_AUTHORIZE_URL: &str = "https://intervals.icu/oauth/authorize";
+const OAUTH_SCOPE: &str = "ACTIVITY:READ";
+const STATE_TTL_SECONDS: i64 = 600; // 10 minutes
+
+#[derive(Debug, Serialize, Deserialize)]
+struct OAuthCredentials {
+    client_id: String,
+    client_secret: String,
+}
+
+#[derive(Debug, Deserialize)]
+struct CallbackQueryParams {
+    code: String,
+    state: String,
+}
+
+#[derive(Debug, Serialize)]
+struct LoginResponse {
+    oauth_url: String,
+    state: String,
+}
+
+#[derive(Debug, Serialize)]
+struct CallbackResponse {
+    access_token: String,
+    user: UserProfile,
+    redirect_path: Option<String>,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+struct UserProfile {
+    id: String,
+    athlete_id: String,
+    username: Option<String>,
+    email: Option<String>,
+    created_at: String,
+    updated_at: String,
+}
+
+async fn function_handler(
+    event: LambdaEvent<ApiGatewayProxyRequest>,
+) -> Result<ApiGatewayProxyResponse, Error> {
+    let (request, _context) = event.into_parts();
+
+    let path = request
+        .path
+        .clone()
+        .unwrap_or_else(|| "unknown".to_string());
+    let method = request.http_method.to_string();
+
+    info!("Auth Lambda invoked - path: {}, method: {}", path, method);
+
+    match (method.as_str(), path.as_str()) {
+        ("POST", "/auth/login") => handle_login(request).await,
+        ("GET", "/auth/callback") => handle_callback(request).await,
+        _ => {
+            error!("Unknown route: {} {}", method, path);
+            Ok(ApiGatewayProxyResponse {
+                status_code: 404,
+                headers: HeaderMap::new(),
+                multi_value_headers: HeaderMap::new(),
+                body: Some(
+                    json!({
+                        "error": "Not found"
+                    })
+                    .to_string()
+                    .into(),
+                ),
+                is_base64_encoded: false,
+            })
+        }
+    }
+}
+
+async fn handle_login(request: ApiGatewayProxyRequest) -> Result<ApiGatewayProxyResponse, Error> {
+    info!("Processing login request");
+
+    // Parse query parameters for optional redirect path
+    let redirect_path = request
+        .query_string_parameters
+        .first("redirect_path")
+        .map(|s| s.to_string());
+
+    // Get environment variables
+    let frontend_url =
+        env::var("FRONTEND_URL").unwrap_or_else(|_| "https://ridelines.xyz".to_string());
+    let oauth_state_table = env::var("OAUTH_STATE_TABLE_NAME")
+        .map_err(|_| Error::from("OAUTH_STATE_TABLE_NAME not set"))?;
+    let oauth_credentials_secret_arn = env::var("OAUTH_CREDENTIALS_SECRET_ARN")
+        .map_err(|_| Error::from("OAUTH_CREDENTIALS_SECRET_ARN not set"))?;
+
+    // Initialize AWS clients
+    let config = aws_config::load_defaults(BehaviorVersion::latest()).await;
+    let dynamodb_client = DynamoDBClient::new(&config);
+    let secrets_client = SecretsManagerClient::new(&config);
+
+    // Get OAuth credentials from Secrets Manager
+    let secret_value = secrets_client
+        .get_secret_value()
+        .secret_id(&oauth_credentials_secret_arn)
+        .send()
+        .await
+        .map_err(|e| Error::from(format!("Failed to retrieve OAuth credentials: {e}")))?;
+
+    let credentials: OAuthCredentials = serde_json::from_str(
+        secret_value
+            .secret_string()
+            .ok_or_else(|| Error::from("OAuth credentials not found"))?,
+    )
+    .map_err(|e| Error::from(format!("Failed to parse OAuth credentials: {e}")))?;
+
+    // Generate state parameter for CSRF protection
+    let state = Uuid::new_v4().to_string();
+    let expires_at = Utc::now() + Duration::seconds(STATE_TTL_SECONDS);
+
+    // Store state in DynamoDB with TTL and optional redirect path
+    let mut put_request = dynamodb_client
+        .put_item()
+        .table_name(&oauth_state_table)
+        .item("state", AttributeValue::S(state.clone()))
+        .item(
+            "expires_at",
+            AttributeValue::N(expires_at.timestamp().to_string()),
+        )
+        .item("created_at", AttributeValue::S(Utc::now().to_rfc3339()));
+
+    if let Some(ref path) = redirect_path {
+        put_request = put_request.item("redirect_path", AttributeValue::S(path.clone()));
+    }
+
+    put_request
+        .send()
+        .await
+        .map_err(|e| Error::from(format!("Failed to store OAuth state: {e}")))?;
+
+    // Build OAuth URL
+    let redirect_uri = format!("{frontend_url}/auth/callback");
+    let oauth_url = format!(
+        "{}?response_type=code&client_id={}&redirect_uri={}&scope={}&state={}",
+        OAUTH_AUTHORIZE_URL,
+        urlencoding::encode(&credentials.client_id),
+        urlencoding::encode(&redirect_uri),
+        urlencoding::encode(OAUTH_SCOPE),
+        urlencoding::encode(&state)
+    );
+
+    info!("OAuth URL generated successfully");
+    metrics::increment_lambda_success();
+
+    let mut headers = HeaderMap::new();
+    headers.insert("Content-Type", "application/json".parse().unwrap());
+
+    Ok(ApiGatewayProxyResponse {
+        status_code: 200,
+        headers,
+        multi_value_headers: HeaderMap::new(),
+        body: Some(
+            serde_json::to_string(&LoginResponse {
+                oauth_url,
+                state: state.clone(),
+            })
+            .map_err(|e| Error::from(format!("Failed to serialize response: {e}")))?
+            .into(),
+        ),
+        is_base64_encoded: false,
+    })
+}
+
+async fn handle_callback(
+    request: ApiGatewayProxyRequest,
+) -> Result<ApiGatewayProxyResponse, Error> {
+    info!("Processing OAuth callback");
+
+    // Parse query parameters
+    let query_params = &request.query_string_parameters;
+    let code = query_params
+        .first("code")
+        .ok_or_else(|| Error::from("Missing code parameter"))?
+        .to_string();
+    let state = query_params
+        .first("state")
+        .ok_or_else(|| Error::from("Missing state parameter"))?
+        .to_string();
+    let params = CallbackQueryParams { code, state };
+
+    // Get environment variables
+    let frontend_url =
+        env::var("FRONTEND_URL").unwrap_or_else(|_| "https://ridelines.xyz".to_string());
+    let api_url = env::var("API_URL").unwrap_or_else(|_| "https://api.ridelines.xyz".to_string());
+    let oauth_state_table = env::var("OAUTH_STATE_TABLE_NAME")
+        .map_err(|_| Error::from("OAUTH_STATE_TABLE_NAME not set"))?;
+    let users_table =
+        env::var("USERS_TABLE_NAME").map_err(|_| Error::from("USERS_TABLE_NAME not set"))?;
+    let oauth_credentials_secret_arn = env::var("OAUTH_CREDENTIALS_SECRET_ARN")
+        .map_err(|_| Error::from("OAUTH_CREDENTIALS_SECRET_ARN not set"))?;
+    let jwt_kms_key_id =
+        env::var("JWT_KMS_KEY_ID").map_err(|_| Error::from("JWT_KMS_KEY_ID not set"))?;
+
+    // Initialize AWS clients
+    let config = aws_config::load_defaults(BehaviorVersion::latest()).await;
+    let dynamodb_client = DynamoDBClient::new(&config);
+    let secrets_client = SecretsManagerClient::new(&config);
+    let kms_client = KmsClient::new(&config);
+
+    // Verify state parameter
+    let state_result = dynamodb_client
+        .get_item()
+        .table_name(&oauth_state_table)
+        .key("state", AttributeValue::S(params.state.clone()))
+        .send()
+        .await
+        .map_err(|e| Error::from(format!("Failed to verify OAuth state: {e}")))?;
+
+    let stored_state = state_result.item.ok_or_else(|| {
+        error!("Invalid OAuth state parameter");
+        Error::from("Invalid state parameter")
+    })?;
+
+    // Extract the redirect path if it was stored
+    let stored_redirect_path = stored_state
+        .get("redirect_path")
+        .and_then(|v| v.as_s().ok())
+        .cloned();
+
+    // Delete the state to prevent reuse
+    dynamodb_client
+        .delete_item()
+        .table_name(&oauth_state_table)
+        .key("state", AttributeValue::S(params.state))
+        .send()
+        .await
+        .map_err(|e| Error::from(format!("Failed to delete OAuth state: {e}")))?;
+
+    // Get OAuth credentials
+    let secret_value = secrets_client
+        .get_secret_value()
+        .secret_id(&oauth_credentials_secret_arn)
+        .send()
+        .await
+        .map_err(|e| Error::from(format!("Failed to retrieve OAuth credentials: {e}")))?;
+
+    let credentials: OAuthCredentials = serde_json::from_str(
+        secret_value
+            .secret_string()
+            .ok_or_else(|| Error::from("OAuth credentials not found"))?,
+    )
+    .map_err(|e| Error::from(format!("Failed to parse OAuth credentials: {e}")))?;
+
+    // Exchange authorization code for access token
+    let mut intervals_client = IntervalsClient::new();
+    let redirect_uri = format!("{frontend_url}/auth/callback");
+
+    let token_request = OAuthTokenRequest {
+        grant_type: "authorization_code".to_string(),
+        code: params.code,
+        redirect_uri,
+        client_id: credentials.client_id,
+        client_secret: credentials.client_secret,
+    };
+
+    let token_response = intervals_client
+        .exchange_oauth_code(token_request)
+        .await
+        .map_err(|e| Error::from(format!("Failed to exchange OAuth code: {e}")))?;
+
+    // Set the access token and fetch user profile
+    intervals_client.set_access_token(&token_response.access_token);
+    let user_profile = intervals_client
+        .get_user_profile()
+        .await
+        .map_err(|e| Error::from(format!("Failed to fetch user profile: {e}")))?;
+
+    // Create or update user in DynamoDB
+    let user_id = Uuid::new_v4().to_string();
+    let now = Utc::now().to_rfc3339();
+
+    let user = UserProfile {
+        id: user_id.clone(),
+        athlete_id: user_profile.id.clone(),
+        username: user_profile.username,
+        email: user_profile.email,
+        created_at: now.clone(),
+        updated_at: now,
+    };
+
+    // Store user (upsert by athlete_id)
+    dynamodb_client
+        .put_item()
+        .table_name(&users_table)
+        .item("id", AttributeValue::S(user.id.clone()))
+        .item("athlete_id", AttributeValue::S(user.athlete_id.clone()))
+        .item(
+            "username",
+            AttributeValue::S(user.username.clone().unwrap_or_default()),
+        )
+        .item(
+            "email",
+            AttributeValue::S(user.email.clone().unwrap_or_default()),
+        )
+        .item("created_at", AttributeValue::S(user.created_at.clone()))
+        .item("updated_at", AttributeValue::S(user.updated_at.clone()))
+        .item("last_login", AttributeValue::S(Utc::now().to_rfc3339()))
+        .send()
+        .await
+        .map_err(|e| Error::from(format!("Failed to store user: {e}")))?;
+
+    // Generate JWT token
+    let jwt_claims = JwtClaims {
+        sub: user.id.clone(),
+        athlete_id: user.athlete_id.clone(),
+        username: user.username.clone(),
+        iat: Utc::now().timestamp(),
+        exp: (Utc::now() + Duration::days(7)).timestamp(), // 7 day expiry
+        iss: api_url,
+        aud: "ridelines-web".to_string(),
+    };
+
+    let jwt_token = generate_jwt_token(&jwt_claims, &jwt_kms_key_id, &kms_client)
+        .await
+        .map_err(|e| Error::from(format!("Failed to generate JWT: {e}")))?;
+
+    info!("OAuth callback processed successfully");
+    metrics::increment_lambda_success();
+
+    let mut headers = HeaderMap::new();
+    headers.insert("Content-Type", "application/json".parse().unwrap());
+
+    Ok(ApiGatewayProxyResponse {
+        status_code: 200,
+        headers,
+        multi_value_headers: HeaderMap::new(),
+        body: Some(
+            serde_json::to_string(&CallbackResponse {
+                access_token: jwt_token,
+                user,
+                redirect_path: stored_redirect_path,
+            })
+            .map_err(|e| Error::from(format!("Failed to serialize response: {e}")))?
+            .into(),
+        ),
+        is_base64_encoded: false,
+    })
 }
 
 #[tokio::main]
