@@ -9,7 +9,7 @@ use chrono::{Duration, Utc};
 use lambda_runtime::{Error, LambdaEvent};
 use metrics_cloudwatch_embedded::lambda::handler::run;
 use ridelines_drivetrain::{
-    api::{LoginResponse, CallbackResponse, UserProfile, CallbackQueryParams},
+    api::{CallbackQueryParams, CallbackResponse, LoginResponse, UserProfile},
     common::{
         intervals_client::{IntervalsClient, OAuthTokenRequest},
         metrics,
@@ -156,7 +156,8 @@ async fn handle_login(request: ApiGatewayProxyRequest) -> Result<ApiGatewayProxy
         body: Some(
             serde_json::to_string(&LoginResponse {
                 oauth_url,
-                state: Uuid::parse_str(&state).map_err(|e| Error::from(format!("Invalid UUID: {e}")))?,
+                state: Uuid::parse_str(&state)
+                    .map_err(|e| Error::from(format!("Invalid UUID: {e}")))?,
             })
             .map_err(|e| Error::from(format!("Failed to serialize response: {e}")))?
             .into(),
@@ -172,11 +173,13 @@ async fn handle_callback(
 
     // Parse query parameters using generated type
     let params = CallbackQueryParams {
-        code: request.query_string_parameters
+        code: request
+            .query_string_parameters
             .first("code")
             .ok_or_else(|| Error::from("Missing code parameter"))?
             .to_string(),
-        state: request.query_string_parameters
+        state: request
+            .query_string_parameters
             .first("state")
             .ok_or_else(|| Error::from("Missing state parameter"))?
             .parse()
@@ -297,8 +300,14 @@ async fn handle_callback(
             "email",
             AttributeValue::S(user.email.clone().unwrap_or_default()),
         )
-        .item("created_at", AttributeValue::S(user.created_at.to_rfc3339()))
-        .item("updated_at", AttributeValue::S(user.updated_at.to_rfc3339()))
+        .item(
+            "created_at",
+            AttributeValue::S(user.created_at.to_rfc3339()),
+        )
+        .item(
+            "updated_at",
+            AttributeValue::S(user.updated_at.to_rfc3339()),
+        )
         .item("last_login", AttributeValue::S(Utc::now().to_rfc3339()))
         .send()
         .await

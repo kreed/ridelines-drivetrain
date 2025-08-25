@@ -14,8 +14,8 @@ fn main() {
         .expect("Failed to read OpenAPI specification");
 
     // Parse the OpenAPI spec
-    let openapi_spec: serde_yaml::Value = serde_yaml::from_str(&openapi_content)
-        .expect("Failed to parse OpenAPI specification");
+    let openapi_spec: serde_yaml::Value =
+        serde_yaml::from_str(&openapi_content).expect("Failed to parse OpenAPI specification");
 
     // Extract the components/schemas section
     let schemas = openapi_spec
@@ -24,11 +24,10 @@ fn main() {
         .expect("No schemas found in OpenAPI specification");
 
     // Convert to JSON for typify (typify expects JSON Schema)
-    let schemas_json = serde_json::to_value(schemas)
-        .expect("Failed to convert schemas to JSON");
+    let schemas_json = serde_json::to_value(schemas).expect("Failed to convert schemas to JSON");
 
     // Generate Rust types using typify
-    // Create a complete JSON Schema document for proper $ref resolution  
+    // Create a complete JSON Schema document for proper $ref resolution
     let json_schema_document = serde_json::json!({
         "$schema": "http://json-schema.org/draft-07/schema#",
         "definitions": schemas_json
@@ -39,14 +38,15 @@ fn main() {
     settings.with_struct_builder(true);
 
     let mut type_space = typify::TypeSpace::new(&settings);
-    
+
     // Convert to schema and add
-    let schema: schemars::schema::RootSchema = serde_json::from_value(json_schema_document)
-        .expect("Failed to parse schema document");
-    
+    let schema: schemars::schema::RootSchema =
+        serde_json::from_value(json_schema_document).expect("Failed to parse schema document");
+
     // Add the reference types from definitions
     if !schema.definitions.is_empty() {
-        type_space.add_ref_types(schema.definitions)
+        type_space
+            .add_ref_types(schema.definitions)
             .expect("Failed to add reference types");
     }
 
@@ -57,8 +57,7 @@ fn main() {
     let final_code = format!("#[allow(clippy::all)]\npub mod generated {{\n{generated_code}\n}}");
 
     // Write the generated types to the output file
-    fs::write(&dest_path, final_code)
-        .expect("Failed to write generated types");
+    fs::write(&dest_path, final_code).expect("Failed to write generated types");
 
     println!("Generated API types at: {}", dest_path.display());
 }
