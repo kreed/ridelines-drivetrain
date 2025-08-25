@@ -15,7 +15,7 @@ pub struct JwtClaims {
     pub aud: String,              // Audience (ridelines-web)
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, Deserialize)]
 struct JwtHeader {
     alg: String,
     typ: String,
@@ -68,6 +68,69 @@ pub async fn generate_jwt_token(
 
     // Construct the JWT
     Ok(format!("{message}.{signature_b64}"))
+}
+
+pub async fn verify_jwt_token(
+    token: &str,
+    kms_key_id: &str,
+    kms_client: &KmsClient,
+) -> Result<JwtClaims, Box<dyn std::error::Error>> {
+    // Split JWT into parts
+    let parts: Vec<&str> = token.split('.').collect();
+    if parts.len() != 3 {
+        return Err("Invalid JWT format".into());
+    }
+
+    let header_b64 = parts[0];
+    let claims_b64 = parts[1];
+    let signature_b64 = parts[2];
+
+    // Decode and parse header
+    let header_bytes = URL_SAFE_NO_PAD.decode(header_b64)?;
+    let header: JwtHeader = serde_json::from_slice(&header_bytes)?;
+
+    // Verify the key ID matches
+    if header.kid != kms_key_id {
+        return Err("Invalid key ID in JWT header".into());
+    }
+
+    // Decode and parse claims
+    let claims_bytes = URL_SAFE_NO_PAD.decode(claims_b64)?;
+    let claims: JwtClaims = serde_json::from_slice(&claims_bytes)?;
+
+    // Check expiration
+    let now = chrono::Utc::now().timestamp();
+    if claims.exp < now {
+        return Err("JWT token has expired".into());
+    }
+
+    // Create the message to verify
+    let message = format!("{header_b64}.{claims_b64}");
+
+    // Hash the message with SHA256
+    let mut hasher = Sha256::new();
+    hasher.update(message.as_bytes());
+    let hash = hasher.finalize();
+
+    // Decode the signature
+    let signature = URL_SAFE_NO_PAD.decode(signature_b64)?;
+
+    // Verify with KMS
+    let verify_response = kms_client
+        .verify()
+        .key_id(kms_key_id)
+        .message(Blob::new(hash.to_vec()))
+        .signature(Blob::new(signature))
+        .signing_algorithm(aws_sdk_kms::types::SigningAlgorithmSpec::RsassaPkcs1V15Sha256)
+        .message_type(aws_sdk_kms::types::MessageType::Digest)
+        .send()
+        .await?;
+
+    if !verify_response.signature_valid() {
+        return Err("Invalid JWT signature".into());
+    }
+
+    Ok(claims)
 }
 
 #[cfg(test)]

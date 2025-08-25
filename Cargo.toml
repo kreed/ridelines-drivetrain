@@ -20,6 +20,10 @@ path = "src/auth_lambda/main.rs"
 name = "user_lambda"
 path = "src/user_lambda/main.rs"
 
+[[bin]]
+name = "auth_verify_lambda"
+path = "src/auth_verify_lambda/main.rs"
+
 [dependencies]
 # Existing dependencies for sync Lambda
 reqwest = { version = "0.12.22", features = ["rustls-tls"], default-features = false }

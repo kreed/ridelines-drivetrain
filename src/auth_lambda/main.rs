@@ -1,5 +1,7 @@
 use aws_config::BehaviorVersion;
-use aws_lambda_events::apigw::{ApiGatewayProxyRequest, ApiGatewayProxyResponse};
+use aws_lambda_events::apigw::{
+    ApiGatewayProxyRequest, ApiGatewayProxyResponse,
+};
 use aws_lambda_events::http::HeaderMap;
 use aws_sdk_dynamodb::Client as DynamoDBClient;
 use aws_sdk_dynamodb::types::AttributeValue;
@@ -22,8 +24,7 @@ use std::env;
 use tracing::{error, info, info_span};
 use uuid::Uuid;
 
-mod jwt;
-use jwt::{JwtClaims, generate_jwt_token};
+use ridelines_drivetrain::common::jwt::{JwtClaims, generate_jwt_token};
 
 const OAUTH_AUTHORIZE_URL: &str = "https://intervals.icu/oauth/authorize";
 const OAUTH_SCOPE: &str = "ACTIVITY:READ";
@@ -188,7 +189,7 @@ async fn handle_callback(
     // Get environment variables
     let frontend_url =
         env::var("FRONTEND_URL").unwrap_or_else(|_| "https://ridelines.xyz".to_string());
-    let api_url = env::var("API_URL").unwrap_or_else(|_| "https://api.ridelines.xyz".to_string());
+    let api_domain = env::var("API_DOMAIN").map_err(|_| Error::from("API_DOMAIN not set"))?;
     let oauth_state_table = env::var("OAUTH_STATE_TABLE_NAME")
         .map_err(|_| Error::from("OAUTH_STATE_TABLE_NAME not set"))?;
     let users_table =
@@ -304,7 +305,7 @@ async fn handle_callback(
         username: user.username.clone(),
         iat: Utc::now().timestamp(),
         exp: (Utc::now() + Duration::days(7)).timestamp(), // 7 day expiry
-        iss: api_url,
+        iss: api_domain,
         aud: "ridelines-web".to_string(),
     };
 
@@ -317,6 +318,22 @@ async fn handle_callback(
 
     let mut headers = HeaderMap::new();
     headers.insert("Content-Type", "application/json".parse().unwrap());
+    
+    // Set JWT as HttpOnly cookie
+    let api_domain = env::var("API_DOMAIN")
+        .map_err(|_| Error::from("API_DOMAIN not set"))?;
+    
+    headers.insert(
+        "Set-Cookie",
+        format!(
+            "ridelines_auth={}; Domain={}; Path=/; HttpOnly; Secure; SameSite=Strict; Max-Age={}",
+            jwt_token,
+            api_domain,
+            60 * 60 * 24 * 7 // 7 days in seconds
+        )
+        .parse()
+        .unwrap(),
+    );
 
     Ok(ApiGatewayProxyResponse {
         status_code: 200,

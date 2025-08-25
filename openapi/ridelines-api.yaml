@@ -211,17 +211,17 @@ paths:
 components:
   securitySchemes:
     JWTAuth:
-      type: http
-      scheme: bearer
-      bearerFormat: JWT
-      description: JWT token obtained from /auth/callback
+      type: apiKey
+      name: Cookie
+      in: header
+      description: JWT token in ridelines_auth cookie
+      x-amazon-apigateway-authtype: custom
       x-amazon-apigateway-authorizer:
-        type: jwt
-        jwtConfiguration:
-          issuer: "https://${domain_name}"
-          audience:
-            - "ridelines-web"
-        identitySource: "$request.header.Authorization"
+        type: request
+        authorizerUri: "arn:aws:apigateway:$${AWS::Region}:lambda:path/2015-03-31/functions/${auth_verify_lambda_arn}/invocations"
+        authorizerCredentials: "${auth_verify_lambda_role_arn}"
+        authorizerResultTtlInSeconds: 300
+        identitySource: "method.request.header.Cookie"
 
   schemas:
     # Request Parameter Types
