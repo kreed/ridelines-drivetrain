@@ -89,6 +89,7 @@ jobs:
           COPY target/lambda/auth_lambda/bootstrap.zip /auth-lambda-package.zip
           COPY target/lambda/user_lambda/bootstrap.zip /user-lambda-package.zip
           COPY target/lambda/sync_lambda/bootstrap.zip /sync-lambda-package.zip
+          COPY openapi/ridelines-api.yaml /ridelines-api.yaml
           EOF
 
       - name: Log in to Container Registry

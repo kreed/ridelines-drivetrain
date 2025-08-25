@@ -8,9 +8,12 @@ use aws_sdk_secretsmanager::Client as SecretsManagerClient;
 use chrono::{Duration, Utc};
 use lambda_runtime::{Error, LambdaEvent};
 use metrics_cloudwatch_embedded::lambda::handler::run;
-use ridelines_drivetrain::common::{
-    intervals_client::{IntervalsClient, OAuthTokenRequest},
-    metrics,
+use ridelines_drivetrain::{
+    api::{LoginResponse, CallbackResponse, UserProfile, CallbackQueryParams},
+    common::{
+        intervals_client::{IntervalsClient, OAuthTokenRequest},
+        metrics,
+    },
 };
 use serde::{Deserialize, Serialize};
 use serde_json::json;
@@ -31,34 +34,7 @@ struct OAuthCredentials {
     client_secret: String,
 }
 
-#[derive(Debug, Deserialize)]
-struct CallbackQueryParams {
-    code: String,
-    state: String,
-}
-
-#[derive(Debug, Serialize)]
-struct LoginResponse {
-    oauth_url: String,
-    state: String,
-}
-
-#[derive(Debug, Serialize)]
-struct CallbackResponse {
-    access_token: String,
-    user: UserProfile,
-    redirect_path: Option<String>,
-}
-
-#[derive(Debug, Serialize, Deserialize)]
-struct UserProfile {
-    id: String,
-    athlete_id: String,
-    username: Option<String>,
-    email: Option<String>,
-    created_at: String,
-    updated_at: String,
-}
+// Using generated types from OpenAPI spec instead of manual structs
 
 async fn function_handler(
     event: LambdaEvent<ApiGatewayProxyRequest>,
@@ -180,7 +156,7 @@ async fn handle_login(request: ApiGatewayProxyRequest) -> Result<ApiGatewayProxy
         body: Some(
             serde_json::to_string(&LoginResponse {
                 oauth_url,
-                state: state.clone(),
+                state: Uuid::parse_str(&state).map_err(|e| Error::from(format!("Invalid UUID: {e}")))?,
             })
             .map_err(|e| Error::from(format!("Failed to serialize response: {e}")))?
             .into(),
@@ -194,17 +170,18 @@ async fn handle_callback(
 ) -> Result<ApiGatewayProxyResponse, Error> {
     info!("Processing OAuth callback");
 
-    // Parse query parameters
-    let query_params = &request.query_string_parameters;
-    let code = query_params
-        .first("code")
-        .ok_or_else(|| Error::from("Missing code parameter"))?
-        .to_string();
-    let state = query_params
-        .first("state")
-        .ok_or_else(|| Error::from("Missing state parameter"))?
-        .to_string();
-    let params = CallbackQueryParams { code, state };
+    // Parse query parameters using generated type
+    let params = CallbackQueryParams {
+        code: request.query_string_parameters
+            .first("code")
+            .ok_or_else(|| Error::from("Missing code parameter"))?
+            .to_string(),
+        state: request.query_string_parameters
+            .first("state")
+            .ok_or_else(|| Error::from("Missing state parameter"))?
+            .parse()
+            .map_err(|e| Error::from(format!("Invalid UUID for state parameter: {e}")))?,
+    };
 
     // Get environment variables
     let frontend_url =
@@ -229,7 +206,7 @@ async fn handle_callback(
     let state_result = dynamodb_client
         .get_item()
         .table_name(&oauth_state_table)
-        .key("state", AttributeValue::S(params.state.clone()))
+        .key("state", AttributeValue::S(params.state.to_string()))
         .send()
         .await
         .map_err(|e| Error::from(format!("Failed to verify OAuth state: {e}")))?;
@@ -249,7 +226,7 @@ async fn handle_callback(
     dynamodb_client
         .delete_item()
         .table_name(&oauth_state_table)
-        .key("state", AttributeValue::S(params.state))
+        .key("state", AttributeValue::S(params.state.to_string()))
         .send()
         .await
         .map_err(|e| Error::from(format!("Failed to delete OAuth state: {e}")))?;
@@ -294,15 +271,15 @@ async fn handle_callback(
         .map_err(|e| Error::from(format!("Failed to fetch user profile: {e}")))?;
 
     // Create or update user in DynamoDB
-    let user_id = Uuid::new_v4().to_string();
-    let now = Utc::now().to_rfc3339();
+    let user_id = Uuid::new_v4();
+    let now = Utc::now();
 
     let user = UserProfile {
-        id: user_id.clone(),
+        id: user_id,
         athlete_id: user_profile.id.clone(),
         username: user_profile.username,
         email: user_profile.email,
-        created_at: now.clone(),
+        created_at: now,
         updated_at: now,
     };
 
@@ -310,7 +287,7 @@ async fn handle_callback(
     dynamodb_client
         .put_item()
         .table_name(&users_table)
-        .item("id", AttributeValue::S(user.id.clone()))
+        .item("id", AttributeValue::S(user.id.to_string()))
         .item("athlete_id", AttributeValue::S(user.athlete_id.clone()))
         .item(
             "username",
@@ -320,8 +297,8 @@ async fn handle_callback(
             "email",
             AttributeValue::S(user.email.clone().unwrap_or_default()),
         )
-        .item("created_at", AttributeValue::S(user.created_at.clone()))
-        .item("updated_at", AttributeValue::S(user.updated_at.clone()))
+        .item("created_at", AttributeValue::S(user.created_at.to_rfc3339()))
+        .item("updated_at", AttributeValue::S(user.updated_at.to_rfc3339()))
         .item("last_login", AttributeValue::S(Utc::now().to_rfc3339()))
         .send()
         .await
@@ -329,7 +306,7 @@ async fn handle_callback(
 
     // Generate JWT token
     let jwt_claims = JwtClaims {
-        sub: user.id.clone(),
+        sub: user.id.to_string(),
         athlete_id: user.athlete_id.clone(),
         username: user.username.clone(),
         iat: Utc::now().timestamp(),

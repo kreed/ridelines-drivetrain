@@ -1,0 +1,369 @@
+openapi: 3.0.3
+info:
+  title: Ridelines API
+  description: GPS activity visualization system API with OAuth authentication
+  version: 1.0.0
+  contact:
+    name: Ridelines
+    url: https://ridelines.xyz
+
+servers:
+  - url: https://api.ridelines.xyz
+    description: Production API
+  - url: https://dev.api.ridelines.xyz  
+    description: Development API
+
+paths:
+  # Auth endpoints (no authentication required)
+  /auth/login:
+    post:
+      summary: Initiate OAuth login flow
+      description: Generate OAuth URL and state parameter for intervals.icu authentication
+      operationId: loginStart
+      tags:
+        - Authentication
+      parameters:
+        - name: redirect_path
+          in: query
+          description: Optional path to redirect to after successful authentication
+          schema:
+            type: string
+            example: "/dashboard"
+      responses:
+        '200':
+          description: OAuth URL generated successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LoginResponse'
+        '500':
+          description: Internal server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /auth/callback:
+    get:
+      summary: Complete OAuth login flow
+      description: Exchange authorization code for JWT token and user profile
+      operationId: loginCallback
+      tags:
+        - Authentication
+      parameters:
+        - name: code
+          in: query
+          required: true
+          description: Authorization code from intervals.icu
+          schema:
+            type: string
+        - name: state
+          in: query
+          required: true
+          description: State parameter for CSRF protection
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Authentication successful
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CallbackResponse'
+        '400':
+          description: Invalid or missing parameters
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '500':
+          description: Internal server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  # Protected endpoints (require JWT authentication)
+  /api/user:
+    get:
+      summary: Get user profile and PMTiles URL
+      description: Retrieve authenticated user's profile and activity data URL
+      operationId: getUserProfile
+      tags:
+        - User
+      security:
+        - JWTAuth: []
+      responses:
+        '200':
+          description: User profile retrieved successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UserProfileResponse'
+        '401':
+          description: Authentication required or invalid token
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '500':
+          description: Internal server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /api/sync:
+    post:
+      summary: Trigger activity sync
+      description: Start synchronization of activities from intervals.icu for authenticated user
+      operationId: triggerSync
+      tags:
+        - Sync
+      security:
+        - JWTAuth: []
+      responses:
+        '202':
+          description: Sync initiated successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SyncResponse'
+        '401':
+          description: Authentication required or invalid token
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '409':
+          description: Sync already in progress for user
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '500':
+          description: Internal server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /api/sync/status:
+    get:
+      summary: Get sync status
+      description: Retrieve current synchronization status for authenticated user
+      operationId: getSyncStatus
+      tags:
+        - Sync
+      security:
+        - JWTAuth: []
+      responses:
+        '200':
+          description: Sync status retrieved successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SyncStatusResponse'
+        '401':
+          description: Authentication required or invalid token
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '500':
+          description: Internal server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+components:
+  securitySchemes:
+    JWTAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: JWT token obtained from /auth/callback
+
+  schemas:
+    # Request Parameter Types
+    LoginQueryParams:
+      type: object
+      properties:
+        redirect_path:
+          type: string
+          nullable: true
+          description: Optional path to redirect to after successful authentication
+          example: "/dashboard"
+
+    CallbackQueryParams:
+      type: object
+      required:
+        - code
+        - state
+      properties:
+        code:
+          type: string
+          description: Authorization code from intervals.icu
+        state:
+          type: string
+          format: uuid
+          description: State parameter for CSRF protection
+          example: "550e8400-e29b-41d4-a716-446655440000"
+    # Auth Request/Response Types
+    LoginResponse:
+      type: object
+      required:
+        - oauth_url
+        - state
+      properties:
+        oauth_url:
+          type: string
+          format: uri
+          description: URL to redirect user to for OAuth authentication
+          example: "https://intervals.icu/oauth/authorize?response_type=code&client_id=..."
+        state:
+          type: string
+          format: uuid
+          description: CSRF protection state parameter
+          example: "550e8400-e29b-41d4-a716-446655440000"
+
+    CallbackResponse:
+      type: object
+      required:
+        - access_token
+        - user
+      properties:
+        access_token:
+          type: string
+          description: JWT access token for API authentication
+          example: "eyJ0eXAiOiJKV1QiLCJhbGciOiJSUzI1NiJ9..."
+        user:
+          $ref: '#/components/schemas/UserProfile'
+        redirect_path:
+          type: string
+          nullable: true
+          description: Optional path to redirect to after authentication
+          example: "/dashboard"
+
+    # User Types
+    UserProfile:
+      type: object
+      required:
+        - id
+        - athlete_id
+        - created_at
+        - updated_at
+      properties:
+        id:
+          type: string
+          format: uuid
+          description: Internal user ID
+          example: "550e8400-e29b-41d4-a716-446655440000"
+        athlete_id:
+          type: string
+          description: intervals.icu athlete ID
+          example: "i351926"
+        username:
+          type: string
+          nullable: true
+          description: Username from intervals.icu
+          example: "john_doe"
+        email:
+          type: string
+          format: email
+          nullable: true
+          description: Email address from intervals.icu
+          example: "john@example.com"
+        created_at:
+          type: string
+          format: date-time
+          description: User account creation timestamp
+          example: "2024-01-15T10:30:00Z"
+        updated_at:
+          type: string
+          format: date-time
+          description: User account last update timestamp
+          example: "2024-01-15T10:30:00Z"
+
+    UserProfileResponse:
+      type: object
+      required:
+        - user
+        - pmtiles_url
+      properties:
+        user:
+          $ref: '#/components/schemas/UserProfile'
+        pmtiles_url:
+          type: string
+          format: uri
+          description: CDN URL for user's PMTiles activity data
+          example: "https://d1234.cloudfront.net/activities/i351926.pmtiles"
+
+    # Sync Types
+    SyncResponse:
+      type: object
+      required:
+        - status
+        - message
+      properties:
+        status:
+          type: string
+          enum: [initiated]
+          description: Current sync status
+        message:
+          type: string
+          description: Human-readable status message
+          example: "Activity synchronization initiated"
+
+    SyncStatusResponse:
+      type: object
+      required:
+        - status
+        - last_sync_at
+      properties:
+        status:
+          type: string
+          enum: [idle, syncing, completed, failed]
+          description: Current sync status
+        last_sync_at:
+          type: string
+          format: date-time
+          nullable: true
+          description: Timestamp of last completed sync
+          example: "2024-01-15T10:30:00Z"
+        activities_count:
+          type: integer
+          nullable: true
+          description: Number of activities synchronized
+          example: 142
+        error_message:
+          type: string
+          nullable: true
+          description: Error message if sync failed
+          example: "intervals.icu API rate limit exceeded"
+
+    # Error Types
+    ErrorResponse:
+      type: object
+      required:
+        - error
+      properties:
+        error:
+          type: string
+          description: Error message
+          example: "Invalid state parameter"
+        details:
+          type: string
+          nullable: true
+          description: Additional error details
+          example: "State parameter not found or expired"
+
+tags:
+  - name: Authentication
+    description: OAuth authentication endpoints
+  - name: User
+    description: User profile and data endpoints
+  - name: Sync
+    description: Activity synchronization endpoints
