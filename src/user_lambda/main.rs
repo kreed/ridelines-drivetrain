@@ -31,7 +31,10 @@ async fn function_handler(
         Err(e) => {
             error!("Failed to extract user ID: {}", e);
             metrics::increment_lambda_failure();
-            return Ok(create_error_response(401, "Invalid or missing authentication"));
+            return Ok(create_error_response(
+                401,
+                "Invalid or missing authentication",
+            ));
         }
     };
 

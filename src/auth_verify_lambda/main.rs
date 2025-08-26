@@ -1,9 +1,9 @@
 use aws_config::BehaviorVersion;
 use aws_lambda_events::apigw::{
-    ApiGatewayCustomAuthorizerRequestTypeRequest, ApiGatewayCustomAuthorizerResponse,
-    ApiGatewayCustomAuthorizerPolicy,
+    ApiGatewayCustomAuthorizerPolicy, ApiGatewayCustomAuthorizerRequestTypeRequest,
+    ApiGatewayCustomAuthorizerResponse,
 };
-use aws_lambda_events::event::iam::{IamPolicyStatement, IamPolicyEffect};
+use aws_lambda_events::event::iam::{IamPolicyEffect, IamPolicyStatement};
 use aws_sdk_kms::Client as KmsClient;
 use lambda_runtime::{Error, LambdaEvent};
 use metrics_cloudwatch_embedded::lambda::handler::run;
@@ -12,13 +12,13 @@ use std::collections::HashMap;
 use std::env;
 use tracing::{error, info, info_span};
 
-use ridelines_drivetrain::common::jwt::{verify_jwt_token, JwtClaims};
+use ridelines_drivetrain::common::jwt::{JwtClaims, verify_jwt_token};
 
 async fn function_handler(
     event: LambdaEvent<ApiGatewayCustomAuthorizerRequestTypeRequest>,
 ) -> Result<ApiGatewayCustomAuthorizerResponse, Error> {
     let (request, _context) = event.into_parts();
-    
+
     info!("Processing API Gateway custom authorizer request");
     handle_api_gateway_authorizer(request).await
 }
@@ -80,10 +80,10 @@ async fn handle_api_gateway_authorizer(
     })
 }
 
-
 async fn verify_jwt(token: &str) -> Result<JwtClaims, Error> {
     // Get KMS key ID from environment
-    let jwt_kms_key_id = env::var("JWT_KMS_KEY_ID").map_err(|_| Error::from("JWT_KMS_KEY_ID not set"))?;
+    let jwt_kms_key_id =
+        env::var("JWT_KMS_KEY_ID").map_err(|_| Error::from("JWT_KMS_KEY_ID not set"))?;
 
     // Initialize AWS clients
     let config = aws_config::load_defaults(BehaviorVersion::latest()).await;
@@ -105,7 +105,6 @@ fn extract_jwt_from_cookie(cookie_header: &str) -> Option<&str> {
         .find(|cookie| cookie.starts_with("ridelines_auth="))
         .and_then(|cookie| cookie.strip_prefix("ridelines_auth="))
 }
-
 
 #[tokio::main]
 async fn main() -> Result<(), Error> {

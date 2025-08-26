@@ -3,7 +3,7 @@ name: Build and Publish Drivetrain
 on:
   push:
     branches: [main]
-    paths-ignore: 
+    paths-ignore:
       - '*.md'
       - '.gitignore'
       - 'LICENSE'
@@ -87,6 +87,7 @@ jobs:
           cat > Dockerfile.lambda << 'EOF'
           FROM scratch
           COPY target/lambda/auth_lambda/bootstrap.zip /auth-lambda-package.zip
+          COPY target/lambda/auth_verify_lambda/bootstrap.zip /auth-verify-lambda-package.zip
           COPY target/lambda/user_lambda/bootstrap.zip /user-lambda-package.zip
           COPY target/lambda/sync_lambda/bootstrap.zip /sync-lambda-package.zip
           COPY openapi/ridelines-api.yaml /ridelines-api.yaml
@@ -141,6 +142,7 @@ jobs:
           echo "## Lambda Package Build Summary" >> $GITHUB_STEP_SUMMARY
           echo "✅ All Lambda functions built successfully:" >> $GITHUB_STEP_SUMMARY
           echo "  - auth-lambda (OAuth flow)" >> $GITHUB_STEP_SUMMARY
+          echo "  - auth-verify-lambda (Custom authorizer)" >> $GITHUB_STEP_SUMMARY
           echo "  - user-lambda (Protected APIs)" >> $GITHUB_STEP_SUMMARY
           echo "  - sync-lambda (Activity processing)" >> $GITHUB_STEP_SUMMARY
           echo "✅ Container image published to registry" >> $GITHUB_STEP_SUMMARY
@@ -148,5 +150,3 @@ jobs:
           echo "🏷️ Tags: " >> $GITHUB_STEP_SUMMARY
           echo "${{ steps.meta-lambda.outputs.tags }}" >> $GITHUB_STEP_SUMMARY
           echo "🔗 Bundle build triggered in frame repository" >> $GITHUB_STEP_SUMMARY
-
-

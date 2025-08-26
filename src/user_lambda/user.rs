@@ -40,7 +40,8 @@ pub async fn handle_get_user_profile(user_id: String) -> Result<ApiGatewayProxyR
         })?;
 
     // Get frontend URL for PMTiles URL generation
-    let frontend_url = env::var("FRONTEND_URL").unwrap_or_else(|_| "https://ridelines.xyz".to_string());
+    let frontend_url =
+        env::var("FRONTEND_URL").unwrap_or_else(|_| "https://ridelines.xyz".to_string());
     let pmtiles_url = format!("{}/activities/{}.pmtiles", frontend_url, user.athlete_id);
 
     let response = UserProfileResponse {

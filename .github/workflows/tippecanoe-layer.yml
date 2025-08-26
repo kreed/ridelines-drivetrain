@@ -32,7 +32,7 @@ jobs:
         repository: felt/tippecanoe
         ref: ${{ github.event.inputs.tippecanoe_version || 'main' }}
         path: tippecanoe
-    
+
     - name: Get tippecanoe commit SHA
       id: tippecanoe_sha
       run: |
@@ -40,41 +40,41 @@ jobs:
         COMMIT_SHA=$(git rev-parse HEAD)
         echo "sha=${COMMIT_SHA}" >> $GITHUB_OUTPUT
         echo "Tippecanoe commit SHA: ${COMMIT_SHA}"
-    
+
     - name: Create Dockerfile
       run: |
         cat > Dockerfile.layer << 'EOF'
         # Build stage
         FROM public.ecr.aws/lambda/provided:al2023 AS builder
-        
+
         # Install build dependencies
         RUN dnf update -y && \
             dnf install -y gcc-c++ make sqlite-devel zlib-devel
-        
+
         # Copy tippecanoe source
         COPY tippecanoe /build/tippecanoe
-        
+
         # Build tippecanoe
         WORKDIR /build/tippecanoe
         RUN make
-        
+
         # Copy binaries and dependencies
         RUN mkdir -p /layer/bin /layer/lib
         RUN cp tippecanoe /layer/bin/
         RUN ldd /layer/bin/tippecanoe | grep "=> /" | awk '{print $3}' | xargs -I '{}' cp '{}' /layer/lib/ || true
-        
+
         # Make binaries executable
         RUN chmod +x /layer/bin/*
-        
+
         # Create layer zip
         WORKDIR /layer
         RUN zip -r /tippecanoe-layer.zip .
-        
+
         # Final stage - package for GHCR
         FROM scratch
         COPY --from=builder /tippecanoe-layer.zip /layer-package.zip
         EOF
-        
+
         echo "Tippecanoe layer Dockerfile created"
 
     - name: Log in to Container Registry

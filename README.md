@@ -64,7 +64,7 @@ The drivetrain package provides three specialized Lambda functions:
 - **Features**: Gap detection, track splitting, data validation
 - **Performance**: Streaming processing for memory efficiency
 
-#### **Tile Generator** (`src/tile_generator.rs`) 
+#### **Tile Generator** (`src/tile_generator.rs`)
 - **Purpose**: Generate PMTiles from GeoJSON using Tippecanoe
 - **Features**: Custom layer integration, optimized settings, compression
 - **Output**: Production-ready vector tiles for web mapping
@@ -78,7 +78,7 @@ The drivetrain package provides three specialized Lambda functions:
 
 #### OAuth Authentication Flow
 1. **🔐 Login**: User initiates OAuth with intervals.icu
-2. **🔑 Token Exchange**: Exchange authorization code for access token  
+2. **🔑 Token Exchange**: Exchange authorization code for access token
 3. **👤 Profile**: Fetch user profile and athlete ID
 4. **🎫 JWT**: Generate signed JWT token for frontend
 
@@ -96,7 +96,7 @@ The drivetrain package provides three specialized Lambda functions:
 - **Language**: Rust 1.82+ for maximum performance
 - **Runtime**: AWS Lambda with `provided.al2023` custom runtime
 - **Build Tool**: Cargo Lambda for cross-compilation
-- **Dependencies**: 
+- **Dependencies**:
   - AWS SDK for cloud services integration
   - Tokio for async runtime
   - Serde for JSON serialization
@@ -181,7 +181,7 @@ OAUTH_STATE_TABLE_NAME=ridelines-oauth-state
 FRONTEND_URL=https://ridelines.xyz
 ```
 
-#### User Lambda  
+#### User Lambda
 ```bash
 USERS_TABLE_NAME=ridelines-users
 JWT_KMS_KEY_ID=alias/ridelines-jwt
@@ -267,7 +267,7 @@ The service emits comprehensive metrics:
 ```rust
 // Example metrics emitted
 - sync.activities.downloaded (Count)
-- sync.activities.processed (Count)  
+- sync.activities.processed (Count)
 - sync.tiles.generated (Count)
 - sync.duration.total (Duration)
 - sync.s3.upload.duration (Duration)

@@ -1,7 +1,5 @@
 use aws_config::BehaviorVersion;
-use aws_lambda_events::apigw::{
-    ApiGatewayProxyRequest, ApiGatewayProxyResponse,
-};
+use aws_lambda_events::apigw::{ApiGatewayProxyRequest, ApiGatewayProxyResponse};
 use aws_lambda_events::http::HeaderMap;
 use aws_sdk_dynamodb::Client as DynamoDBClient;
 use aws_sdk_dynamodb::types::AttributeValue;
@@ -318,11 +316,10 @@ async fn handle_callback(
 
     let mut headers = HeaderMap::new();
     headers.insert("Content-Type", "application/json".parse().unwrap());
-    
+
     // Set JWT as HttpOnly cookie
-    let api_domain = env::var("API_DOMAIN")
-        .map_err(|_| Error::from("API_DOMAIN not set"))?;
-    
+    let api_domain = env::var("API_DOMAIN").map_err(|_| Error::from("API_DOMAIN not set"))?;
+
     headers.insert(
         "Set-Cookie",
         format!(
