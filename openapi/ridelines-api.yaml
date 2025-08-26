@@ -10,7 +10,7 @@ info:
 servers:
   - url: https://api.ridelines.xyz
     description: Production API
-  - url: https://dev.api.ridelines.xyz
+  - url: https://api.dev.ridelines.xyz
     description: Development API
 
 paths:
