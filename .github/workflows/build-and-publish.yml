@@ -62,8 +62,8 @@ jobs:
     steps:
       - name: Install build dependencies
         run: |
-          yum update -y
-          yum install -y cargo git
+          dnf update -y
+          dnf install -y cargo git
 
       - name: Checkout code
         uses: actions/checkout@v5
