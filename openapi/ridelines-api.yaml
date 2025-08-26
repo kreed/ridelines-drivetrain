@@ -277,11 +277,11 @@ components:
           type: string
           description: intervals.icu athlete ID
           example: "i351926"
-        username:
+        name:
           type: string
           nullable: true
-          description: Username from intervals.icu
-          example: "john_doe"
+          description: Name from intervals.icu
+          example: "John Doe"
         email:
           type: string
           format: email

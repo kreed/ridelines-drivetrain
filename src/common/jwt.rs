@@ -6,13 +6,12 @@ use sha2::{Digest, Sha256};
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct JwtClaims {
-    pub sub: String,              // User ID
-    pub athlete_id: String,       // intervals.icu athlete ID
-    pub username: Option<String>, // Username
-    pub iat: i64,                 // Issued at timestamp
-    pub exp: i64,                 // Expiry timestamp
-    pub iss: String,              // Issuer (api.ridelines.xyz)
-    pub aud: String,              // Audience (ridelines-web)
+    pub sub: String,        // User ID
+    pub athlete_id: String, // intervals.icu athlete ID
+    pub iat: i64,           // Issued at timestamp
+    pub exp: i64,           // Expiry timestamp
+    pub iss: String,        // Issuer (api.ridelines.xyz)
+    pub aud: String,        // Audience (ridelines-web)
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -143,7 +142,6 @@ mod tests {
         let claims = JwtClaims {
             sub: "user-123".to_string(),
             athlete_id: "i123456".to_string(),
-            username: Some("johndoe".to_string()),
             iat: Utc::now().timestamp(),
             exp: (Utc::now() + chrono::Duration::days(7)).timestamp(),
             iss: "https://api.ridelines.xyz".to_string(),
@@ -153,6 +151,5 @@ mod tests {
         let json = serde_json::to_string(&claims).unwrap();
         assert!(json.contains("\"sub\":\"user-123\""));
         assert!(json.contains("\"athlete_id\":\"i123456\""));
-        assert!(json.contains("\"username\":\"johndoe\""));
     }
 }

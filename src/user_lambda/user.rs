@@ -49,7 +49,7 @@ pub async fn handle_get_user_profile(user_id: String) -> Result<ApiGatewayProxyR
             id: uuid::Uuid::parse_str(&user.id)
                 .map_err(|e| Error::from(format!("Invalid user ID format: {e}")))?,
             athlete_id: user.athlete_id,
-            username: user.username,
+            name: user.name,
             email: user.email,
             created_at: user.created_at,
             updated_at: user.updated_at,

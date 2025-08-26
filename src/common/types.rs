@@ -7,7 +7,7 @@ use std::fmt;
 pub struct User {
     pub id: String,
     pub athlete_id: String,
-    pub username: Option<String>,
+    pub name: Option<String>,
     pub email: Option<String>,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,

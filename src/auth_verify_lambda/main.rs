@@ -68,9 +68,6 @@ async fn handle_api_gateway_authorizer(
         "athleteId".to_string(),
         serde_json::Value::String(claims.athlete_id.clone()),
     );
-    if let Some(username) = claims.username {
-        context_map.insert("username".to_string(), serde_json::Value::String(username));
-    }
 
     Ok(ApiGatewayCustomAuthorizerResponse {
         principal_id: Some(claims.sub),

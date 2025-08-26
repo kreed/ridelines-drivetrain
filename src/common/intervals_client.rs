@@ -80,9 +80,12 @@ pub struct OAuthTokenResponse {
 pub struct IntervalsUserProfile {
     pub id: String,
     pub name: String,
-    pub username: Option<String>,
     pub email: Option<String>,
-    pub avatar: Option<String>,
+}
+
+#[derive(Deserialize)]
+pub struct ProfileResponse {
+    pub athlete: IntervalsUserProfile,
 }
 
 pub struct IntervalsClient {
@@ -236,7 +239,7 @@ impl IntervalsClient {
     }
 
     pub async fn get_user_profile(&self) -> Result<IntervalsUserProfile> {
-        let path = format!("{ENDPOINT}/api/athlete");
+        let path = format!("{ENDPOINT}/api/v1/athlete/0/profile");
 
         let auth_header = self
             .auth_header
@@ -265,12 +268,13 @@ impl IntervalsClient {
             metrics::increment_intervals_api_failure();
         })?;
 
-        let profile: IntervalsUserProfile = serde_json::from_str(&response_text).map_err(|e| {
-            metrics::increment_intervals_api_failure();
-            anyhow::anyhow!("Failed to parse user profile response: {}", e)
-        })?;
+        let profile_response: ProfileResponse =
+            serde_json::from_str(&response_text).map_err(|e| {
+                metrics::increment_intervals_api_failure();
+                anyhow::anyhow!("Failed to parse user profile response: {}", e)
+            })?;
 
         metrics::increment_intervals_api_success();
-        Ok(profile)
+        Ok(profile_response.athlete)
     }
 }

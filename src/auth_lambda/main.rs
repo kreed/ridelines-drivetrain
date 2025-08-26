@@ -262,7 +262,7 @@ async fn handle_callback(
     let user = User {
         id: user_id.to_string(),
         athlete_id: user_profile.id.clone(),
-        username: user_profile.username,
+        name: Some(user_profile.name.clone()),
         email: user_profile.email,
         created_at: now,
         updated_at: now,
@@ -285,7 +285,6 @@ async fn handle_callback(
     let jwt_claims = JwtClaims {
         sub: user.id.clone(),
         athlete_id: user.athlete_id.clone(),
-        username: user.username.clone(),
         iat: Utc::now().timestamp(),
         exp: (Utc::now() + Duration::days(7)).timestamp(), // 7 day expiry
         iss: api_domain.clone(),
