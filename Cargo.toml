@@ -47,6 +47,7 @@ aws-sdk-secretsmanager = { version = "1.0", default-features = false, features =
 aws-sdk-dynamodb = { version = "1.0", default-features = false, features = ["rustls"] }
 serde_dynamo = { version = "4", features = ["aws-sdk-dynamodb+1"] }
 aws-sdk-kms = { version = "1.0", default-features = false, features = ["rustls"] }
+cloudfront_sign = "0.4.1"
 aws-config = { version = "1.0", default-features = false, features = ["rustls", "rt-tokio"] }
 function-timer = "0.9.2"
 metrics = "0.24.2"

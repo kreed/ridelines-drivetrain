@@ -302,7 +302,7 @@ async fn handle_callback(
     let redirect_url = stored_oauth_state
         .redirect_path
         .map(|path| format!("{}{}", frontend_url, path))
-        .unwrap_or_else(|| format!("{}/dashboard", frontend_url));
+        .unwrap_or_else(|| format!("{}/", frontend_url));
 
     let mut headers = HeaderMap::new();
     headers.insert("Location", redirect_url.parse().unwrap());
