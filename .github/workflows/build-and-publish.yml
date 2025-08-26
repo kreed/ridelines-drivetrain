@@ -185,7 +185,7 @@ jobs:
             echo "  - ${lambda//_/-} - ${size} (${lambdas[$lambda]})" >> $GITHUB_STEP_SUMMARY
           done
 
-          echo
+          echo >> $GITHUB_STEP_SUMMARY
           echo "✅ Container image published to registry" >> $GITHUB_STEP_SUMMARY
           echo "📦 Package: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}" >> $GITHUB_STEP_SUMMARY
           echo "🏷️ Tags: " >> $GITHUB_STEP_SUMMARY
