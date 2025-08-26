@@ -28,7 +28,7 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  test-rust:
+  test:
     name: Test Rust Code
     runs-on: ubuntu-latest
     steps:
@@ -53,21 +53,21 @@ jobs:
       - name: Check formatting
         run: cargo fmt --check
 
-  build-lambda:
+  build:
     name: Build and Publish Lambda Package
-    needs: test-rust
+    needs: test
     if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     container: public.ecr.aws/lambda/provided:al2023
 
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v5
-
       - name: Install build dependencies
         run: |
           yum update -y
-          yum install -y cargo
+          yum install -y cargo git
+
+      - name: Checkout code
+        uses: actions/checkout@v5
 
       - name: Install cargo-lambda
         run: cargo install cargo-lambda
