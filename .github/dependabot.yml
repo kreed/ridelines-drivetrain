@@ -9,9 +9,9 @@ updates:
       time: "09:00"
     open-pull-requests-limit: 10
     reviewers:
-      - "chriseby"
+      - "kreed"
     assignees:
-      - "chriseby"
+      - "kreed"
     commit-message:
       prefix: "cargo"
       include: "scope"
@@ -39,9 +39,9 @@ updates:
       time: "10:00"
     open-pull-requests-limit: 5
     reviewers:
-      - "chriseby"
+      - "kreed"
     assignees:
-      - "chriseby"
+      - "kreed"
     commit-message:
       prefix: "ci"
       include: "scope"
@@ -55,9 +55,9 @@ updates:
       time: "11:00"
     open-pull-requests-limit: 5
     reviewers:
-      - "chriseby"
+      - "kreed"
     assignees:
-      - "chriseby"
+      - "kreed"
     commit-message:
       prefix: "terraform"
       include: "scope"
