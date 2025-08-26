@@ -170,10 +170,21 @@ jobs:
         run: |
           echo "## Lambda Package Build Summary" >> $GITHUB_STEP_SUMMARY
           echo "✅ All Lambda functions built successfully:" >> $GITHUB_STEP_SUMMARY
-          echo "  - auth-lambda (OAuth flow)" >> $GITHUB_STEP_SUMMARY
-          echo "  - auth-verify-lambda (Custom authorizer)" >> $GITHUB_STEP_SUMMARY
-          echo "  - user-lambda (Protected APIs)" >> $GITHUB_STEP_SUMMARY
-          echo "  - sync-lambda (Activity processing)" >> $GITHUB_STEP_SUMMARY
+
+          # Define lambdas with their descriptions
+          declare -A lambdas=(
+            ["auth_lambda"]="OAuth flow"
+            ["auth_verify_lambda"]="Custom authorizer"
+            ["user_lambda"]="Protected APIs"
+            ["sync_lambda"]="Activity processing"
+          )
+
+          # Loop through each lambda and add size info
+          for lambda in "${!lambdas[@]}"; do
+            size=$(du -h "artifacts/target/lambda/${lambda}/bootstrap.zip" 2>/dev/null | cut -f1 || echo "?")
+            echo "  - ${lambda//_/-} - ${size} (${lambdas[$lambda]})" >> $GITHUB_STEP_SUMMARY
+          done
+
           echo "✅ Container image published to registry" >> $GITHUB_STEP_SUMMARY
           echo "📦 Package: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}" >> $GITHUB_STEP_SUMMARY
           echo "🏷️ Tags: " >> $GITHUB_STEP_SUMMARY
