@@ -16,9 +16,9 @@ servers:
 paths:
   # Auth endpoints (no authentication required)
   /auth/login:
-    post:
+    get:
       summary: Initiate OAuth login flow
-      description: Generate OAuth URL and state parameter for intervals.icu authentication
+      description: Redirect user to intervals.icu OAuth authorization page
       operationId: loginStart
       tags:
         - Authentication
@@ -30,12 +30,15 @@ paths:
             type: string
             example: "/dashboard"
       responses:
-        '200':
-          description: OAuth URL generated successfully
-          content:
-            application/json:
+        '302':
+          description: Redirect to intervals.icu OAuth authorization page
+          headers:
+            Location:
+              description: OAuth authorization URL
               schema:
-                $ref: '#/components/schemas/LoginResponse'
+                type: string
+                format: uri
+                example: "https://intervals.icu/oauth/authorize?response_type=code&client_id=..."
         '500':
           description: Internal server error
           content:
@@ -52,7 +55,7 @@ paths:
   /auth/callback:
     get:
       summary: Complete OAuth login flow
-      description: Exchange authorization code for JWT token and user profile
+      description: Exchange authorization code for JWT token and redirect to frontend
       operationId: loginCallback
       tags:
         - Authentication
@@ -71,12 +74,20 @@ paths:
             type: string
             format: uuid
       responses:
-        '200':
-          description: Authentication successful
-          content:
-            application/json:
+        '302':
+          description: Authentication successful, redirect to frontend
+          headers:
+            Location:
+              description: Frontend URL to redirect to
               schema:
-                $ref: '#/components/schemas/CallbackResponse'
+                type: string
+                format: uri
+                example: "https://ridelines.xyz/dashboard"
+            Set-Cookie:
+              description: JWT authentication cookie
+              schema:
+                type: string
+                example: "ridelines_auth=eyJ...; HttpOnly; Secure; SameSite=Strict"
         '400':
           description: Invalid or missing parameters
           content:
@@ -248,42 +259,6 @@ components:
           format: uuid
           description: State parameter for CSRF protection
           example: "550e8400-e29b-41d4-a716-446655440000"
-    # Auth Request/Response Types
-    LoginResponse:
-      type: object
-      required:
-        - oauth_url
-        - state
-      properties:
-        oauth_url:
-          type: string
-          format: uri
-          description: URL to redirect user to for OAuth authentication
-          example: "https://intervals.icu/oauth/authorize?response_type=code&client_id=..."
-        state:
-          type: string
-          format: uuid
-          description: CSRF protection state parameter
-          example: "550e8400-e29b-41d4-a716-446655440000"
-
-    CallbackResponse:
-      type: object
-      required:
-        - access_token
-        - user
-      properties:
-        access_token:
-          type: string
-          description: JWT access token for API authentication
-          example: "eyJ0eXAiOiJKV1QiLCJhbGciOiJSUzI1NiJ9..."
-        user:
-          $ref: '#/components/schemas/UserProfile'
-        redirect_path:
-          type: string
-          nullable: true
-          description: Optional path to redirect to after authentication
-          example: "/dashboard"
-
     # User Types
     UserProfile:
       type: object

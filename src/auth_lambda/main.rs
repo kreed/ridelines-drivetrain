@@ -9,7 +9,7 @@ use chrono::{Duration, Utc};
 use lambda_runtime::{Error, LambdaEvent};
 use metrics_cloudwatch_embedded::lambda::handler::run;
 use ridelines_drivetrain::{
-    api::{CallbackQueryParams, CallbackResponse, LoginResponse, UserProfile},
+    api::CallbackQueryParams,
     common::{
         intervals_client::{IntervalsClient, OAuthTokenRequest},
         metrics,
@@ -50,7 +50,7 @@ async fn function_handler(
     info!("Auth Lambda invoked - path: {}, method: {}", path, method);
 
     match (method.as_str(), path.as_str()) {
-        ("POST", "/auth/login") => handle_login(request).await,
+        ("GET", "/auth/login") => handle_login(request).await,
         ("GET", "/auth/callback") => handle_callback(request).await,
         _ => {
             error!("Unknown route: {} {}", method, path);
@@ -141,25 +141,20 @@ async fn handle_login(request: ApiGatewayProxyRequest) -> Result<ApiGatewayProxy
         urlencoding::encode(&state)
     );
 
-    info!("OAuth URL generated successfully");
+    info!(
+        "OAuth URL generated successfully, redirecting to: {}",
+        oauth_url
+    );
     metrics::increment_lambda_success();
 
     let mut headers = HeaderMap::new();
-    headers.insert("Content-Type", "application/json".parse().unwrap());
+    headers.insert("Location", oauth_url.parse().unwrap());
 
     Ok(ApiGatewayProxyResponse {
-        status_code: 200,
+        status_code: 302,
         headers,
         multi_value_headers: HeaderMap::new(),
-        body: Some(
-            serde_json::to_string(&LoginResponse {
-                oauth_url,
-                state: Uuid::parse_str(&state)
-                    .map_err(|e| Error::from(format!("Invalid UUID: {e}")))?,
-            })
-            .map_err(|e| Error::from(format!("Failed to serialize response: {e}")))?
-            .into(),
-        ),
+        body: None,
         is_base64_encoded: false,
     })
 }
@@ -287,15 +282,6 @@ async fn handle_callback(
         .await
         .map_err(|e| Error::from(format!("Failed to store user: {e}")))?;
 
-    let api_user = UserProfile {
-        id: user_id,
-        athlete_id: user.athlete_id.clone(),
-        username: user.username.clone(),
-        email: user.email.clone(),
-        created_at: user.created_at,
-        updated_at: user.updated_at,
-    };
-
     // Generate JWT token
     let jwt_claims = JwtClaims {
         sub: user.id.clone(),
@@ -303,7 +289,7 @@ async fn handle_callback(
         username: user.username.clone(),
         iat: Utc::now().timestamp(),
         exp: (Utc::now() + Duration::days(7)).timestamp(), // 7 day expiry
-        iss: api_domain,
+        iss: api_domain.clone(),
         aud: "ridelines-web".to_string(),
     };
 
@@ -314,12 +300,16 @@ async fn handle_callback(
     info!("OAuth callback processed successfully");
     metrics::increment_lambda_success();
 
+    // Determine redirect URL
+    let redirect_url = stored_oauth_state
+        .redirect_path
+        .map(|path| format!("{}{}", frontend_url, path))
+        .unwrap_or_else(|| format!("{}/dashboard", frontend_url));
+
     let mut headers = HeaderMap::new();
-    headers.insert("Content-Type", "application/json".parse().unwrap());
+    headers.insert("Location", redirect_url.parse().unwrap());
 
     // Set JWT as HttpOnly cookie
-    let api_domain = env::var("API_DOMAIN").map_err(|_| Error::from("API_DOMAIN not set"))?;
-
     headers.insert(
         "Set-Cookie",
         format!(
@@ -332,19 +322,13 @@ async fn handle_callback(
         .unwrap(),
     );
 
+    info!("Redirecting to: {}", redirect_url);
+
     Ok(ApiGatewayProxyResponse {
-        status_code: 200,
+        status_code: 302,
         headers,
         multi_value_headers: HeaderMap::new(),
-        body: Some(
-            serde_json::to_string(&CallbackResponse {
-                access_token: jwt_token,
-                user: api_user,
-                redirect_path: stored_oauth_state.redirect_path,
-            })
-            .map_err(|e| Error::from(format!("Failed to serialize response: {e}")))?
-            .into(),
-        ),
+        body: None,
         is_base64_encoded: false,
     })
 }
