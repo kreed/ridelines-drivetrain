@@ -54,11 +54,10 @@ jobs:
         run: cargo fmt --check
 
   build:
-    name: Build and Publish Lambda Package
-    needs: test
-    if: github.ref == 'refs/heads/main'
+    name: Build Lambda Package
     runs-on: ubuntu-latest
-    container: public.ecr.aws/lambda/provided:al2023
+    container:
+      image: public.ecr.aws/lambda/provided:al2023
 
     steps:
       - name: Install build dependencies
@@ -75,6 +74,36 @@ jobs:
       - name: Setup Rust cache
         uses: Swatinem/rust-cache@v2
 
+      - name: Build Lambda function
+        run: cargo lambda build --release --output-format zip --compiler cargo
+
+      - name: Upload build artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: lambda-artifacts
+          path: |
+            target/lambda/auth_lambda/bootstrap.zip
+            target/lambda/auth_verify_lambda/bootstrap.zip
+            target/lambda/user_lambda/bootstrap.zip
+            target/lambda/sync_lambda/bootstrap.zip
+            openapi/ridelines-api.yaml
+
+  publish:
+    name: Publish Lambda Package
+    needs: [test, build]
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v5
+
+      - name: Download build artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: lambda-artifacts
+          path: artifacts/
+
       - name: Get drivetrain commit SHA
         id: drivetrain_sha
         run: |
@@ -82,18 +111,15 @@ jobs:
           echo "sha=${COMMIT_SHA}" >> $GITHUB_OUTPUT
           echo "Drivetrain commit SHA: ${COMMIT_SHA}"
 
-      - name: Build Lambda function
-        run: cargo lambda build --release --output-format zip --compiler cargo
-
       - name: Create Lambda Dockerfile
         run: |
           cat > Dockerfile.lambda << 'EOF'
           FROM scratch
-          COPY target/lambda/auth_lambda/bootstrap.zip /auth-lambda-package.zip
-          COPY target/lambda/auth_verify_lambda/bootstrap.zip /auth-verify-lambda-package.zip
-          COPY target/lambda/user_lambda/bootstrap.zip /user-lambda-package.zip
-          COPY target/lambda/sync_lambda/bootstrap.zip /sync-lambda-package.zip
-          COPY openapi/ridelines-api.yaml /ridelines-api.yaml
+          COPY artifacts/target/lambda/auth_lambda/bootstrap.zip /auth-lambda-package.zip
+          COPY artifacts/target/lambda/auth_verify_lambda/bootstrap.zip /auth-verify-lambda-package.zip
+          COPY artifacts/target/lambda/user_lambda/bootstrap.zip /user-lambda-package.zip
+          COPY artifacts/target/lambda/sync_lambda/bootstrap.zip /sync-lambda-package.zip
+          COPY artifacts/openapi/ridelines-api.yaml /ridelines-api.yaml
           EOF
 
       - name: Log in to Container Registry
