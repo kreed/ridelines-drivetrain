@@ -63,16 +63,16 @@ jobs:
       - name: Install build dependencies
         run: |
           dnf update -y
-          dnf install -y cargo git
+          dnf install -y cargo git tar
 
       - name: Checkout code
         uses: actions/checkout@v5
 
-      - name: Install cargo-lambda
-        run: cargo install cargo-lambda
-
       - name: Setup Rust cache
         uses: Swatinem/rust-cache@v2
+
+      - name: Install cargo-lambda
+        run: cargo install cargo-lambda
 
       - name: Build Lambda function
         run: cargo lambda build --release --output-format zip --compiler cargo
