@@ -39,8 +39,8 @@ async fn function_handler(
     };
 
     let result = match (method.as_str(), path.as_str()) {
-        ("GET", "/api/user") => handle_get_user_profile(user_id).await,
-        ("GET", "/api/sync/status") => handle_get_sync_status(user_id).await,
+        ("GET", "/user") => handle_get_user_profile(user_id).await,
+        ("GET", "/sync/status") => handle_get_sync_status(user_id).await,
         _ => {
             error!("Unknown route: {} {}", method, path);
             metrics::increment_lambda_failure();

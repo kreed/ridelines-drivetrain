@@ -108,7 +108,7 @@ paths:
         contentHandling: CONVERT_TO_TEXT
 
   # Protected endpoints (require JWT authentication)
-  /api/user:
+  /user:
     get:
       summary: Get user profile and PMTiles URL
       description: Retrieve authenticated user's profile and activity data URL
@@ -143,7 +143,7 @@ paths:
         passthroughBehavior: when_no_match
         contentHandling: CONVERT_TO_TEXT
 
-  /api/sync:
+  /sync:
     post:
       summary: Trigger activity sync
       description: Start synchronization of activities from intervals.icu for authenticated user
@@ -184,7 +184,7 @@ paths:
         passthroughBehavior: when_no_match
         contentHandling: CONVERT_TO_TEXT
 
-  /api/sync/status:
+  /sync/status:
     get:
       summary: Get sync status
       description: Retrieve current synchronization status for authenticated user
