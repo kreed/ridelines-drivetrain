@@ -7,28 +7,45 @@ updates:
       interval: "weekly"
       day: "monday"
       time: "09:00"
-    open-pull-requests-limit: 10
+    open-pull-requests-limit: 5
     reviewers:
       - "kreed"
     assignees:
       - "kreed"
     commit-message:
-      prefix: "cargo"
+      prefix: "chore(deps)"
       include: "scope"
     groups:
-      aws-sdk:
+      # AWS and cloud services
+      aws-services:
         patterns:
           - "aws-*"
-          - "tokio*"
-      lambda-runtime:
-        patterns:
           - "lambda*"
+          - "serde_dynamo"
+        update-types:
+          - "minor"
+          - "patch"
+      # Core async and serialization
+      core-runtime:
+        patterns:
+          - "tokio*"
           - "serde*"
-      geospatial:
+          - "futures"
+          - "reqwest*"
+          - "tracing*"
+        update-types:
+          - "minor"
+          - "patch"
+      # Domain-specific libraries
+      domain-libs:
         patterns:
           - "geo*"
-          - "geojson*"
           - "fitparser*"
+          - "base64"
+          - "csv"
+        update-types:
+          - "minor"
+          - "patch"
 
   # Enable version updates for GitHub Actions
   - package-ecosystem: "github-actions"
@@ -37,27 +54,18 @@ updates:
       interval: "weekly"
       day: "monday"
       time: "10:00"
-    open-pull-requests-limit: 5
+    open-pull-requests-limit: 3
     reviewers:
       - "kreed"
     assignees:
       - "kreed"
     commit-message:
-      prefix: "ci"
+      prefix: "chore(deps)"
       include: "scope"
-
-  # Enable version updates for Terraform/OpenTofu
-  - package-ecosystem: "terraform"
-    directory: "/terraform"
-    schedule:
-      interval: "weekly"
-      day: "monday"
-      time: "11:00"
-    open-pull-requests-limit: 5
-    reviewers:
-      - "kreed"
-    assignees:
-      - "kreed"
-    commit-message:
-      prefix: "terraform"
-      include: "scope"
+    groups:
+      github-actions:
+        patterns:
+          - "*"
+        update-types:
+          - "minor"
+          - "patch"
