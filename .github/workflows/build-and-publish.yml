@@ -58,16 +58,19 @@ jobs:
     needs: test-rust
     if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
+    container: public.ecr.aws/lambda/provided:al2023
 
     steps:
       - name: Checkout code
         uses: actions/checkout@v5
 
-      - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@stable
+      - name: Install build dependencies
+        run: |
+          yum update -y
+          yum install -y cargo
 
       - name: Install cargo-lambda
-        uses: taiki-e/install-action@cargo-lambda
+        run: cargo install cargo-lambda
 
       - name: Setup Rust cache
         uses: Swatinem/rust-cache@v2
