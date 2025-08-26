@@ -81,8 +81,7 @@ async fn handle_login(request: ApiGatewayProxyRequest) -> Result<ApiGatewayProxy
         .map(|s| s.to_string());
 
     // Get environment variables
-    let frontend_url =
-        env::var("FRONTEND_URL").unwrap_or_else(|_| "https://ridelines.xyz".to_string());
+    let api_domain = env::var("API_DOMAIN").map_err(|_| Error::from("API_DOMAIN not set"))?;
     let oauth_state_table = env::var("OAUTH_STATE_TABLE_NAME")
         .map_err(|_| Error::from("OAUTH_STATE_TABLE_NAME not set"))?;
     let oauth_credentials_secret_arn = env::var("OAUTH_CREDENTIALS_SECRET_ARN")
@@ -131,7 +130,7 @@ async fn handle_login(request: ApiGatewayProxyRequest) -> Result<ApiGatewayProxy
         .map_err(|e| Error::from(format!("Failed to store OAuth state: {e}")))?;
 
     // Build OAuth URL
-    let redirect_uri = format!("{frontend_url}/auth/callback");
+    let redirect_uri = format!("https://{api_domain}/auth/callback");
     let oauth_url = format!(
         "{}?response_type=code&client_id={}&redirect_uri={}&scope={}&state={}",
         OAUTH_AUTHORIZE_URL,
