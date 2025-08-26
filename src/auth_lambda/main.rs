@@ -233,7 +233,7 @@ async fn handle_callback(
 
     // Exchange authorization code for access token
     let mut intervals_client = IntervalsClient::new();
-    let redirect_uri = format!("{frontend_url}/auth/callback");
+    let redirect_uri = format!("https://{api_domain}/auth/callback");
 
     let token_request = OAuthTokenRequest {
         grant_type: "authorization_code".to_string(),
