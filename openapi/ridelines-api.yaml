@@ -13,7 +13,7 @@ servers:
   - url: https://api.dev.ridelines.xyz
     description: Development API
 
-# YAML anchors for CORS templates
+# CORS headers for OPTIONS preflight (mock integration)
 x-cors-templates:
   cors-headers: &cors-headers
     Access-Control-Allow-Origin:
@@ -29,12 +29,6 @@ x-cors-templates:
       schema:
         type: string
 
-  cors-response-params: &cors-response-params
-    method.response.header.Access-Control-Allow-Origin: "'${frontend_origin}'"
-    method.response.header.Access-Control-Allow-Methods: "'GET,POST,OPTIONS'"
-    method.response.header.Access-Control-Allow-Headers: "'Content-Type,X-Amz-Date,Authorization,X-Api-Key,X-Amz-Security-Token,Cookie'"
-    method.response.header.Access-Control-Allow-Credentials: "'true'"
-
   cors-options-integration: &cors-options-integration
     type: mock
     requestTemplates:
@@ -42,30 +36,18 @@ x-cors-templates:
     responses:
       default:
         statusCode: 200
-        responseParameters: *cors-response-params
+        responseParameters:
+          method.response.header.Access-Control-Allow-Origin: "'${frontend_origin}'"
+          method.response.header.Access-Control-Allow-Methods: "'GET,POST,OPTIONS'"
+          method.response.header.Access-Control-Allow-Headers: "'Content-Type,X-Amz-Date,Authorization,X-Api-Key,X-Amz-Security-Token,Cookie'"
+          method.response.header.Access-Control-Allow-Credentials: "'true'"
         responseTemplates:
           application/json: '{}'
 
-  cors-response-headers: &cors-response-headers
-    Access-Control-Allow-Origin:
-      schema:
-        type: string
-    Access-Control-Allow-Credentials:
-      schema:
-        type: string
-
-  cors-integration-response: &cors-integration-response
-    default:
-      statusCode: 200
-      responseParameters:
-        method.response.header.Access-Control-Allow-Origin: "'${frontend_origin}'"
-        method.response.header.Access-Control-Allow-Credentials: "'true'"
-
-# Common response templates
+# Common response templates (for documentation only with proxy integration)
 x-response-templates:
   error-401: &error-401
     description: Authentication required or invalid token
-    headers: *cors-response-headers
     content:
       application/json:
         schema:
@@ -73,7 +55,6 @@ x-response-templates:
 
   error-400: &error-400
     description: Invalid or missing parameters
-    headers: *cors-response-headers
     content:
       application/json:
         schema:
@@ -81,7 +62,6 @@ x-response-templates:
 
   error-409: &error-409
     description: Sync already in progress for user
-    headers: *cors-response-headers
     content:
       application/json:
         schema:
@@ -89,28 +69,24 @@ x-response-templates:
 
   error-500: &error-500
     description: Internal server error
-    headers: *cors-response-headers
     content:
       application/json:
         schema:
           $ref: '#/components/schemas/ErrorResponse'
 
-# Common integration templates
+# Lambda proxy integrations (responses are ignored with aws_proxy)
 x-integration-templates:
   user-lambda-integration: &user-lambda-integration
     type: aws_proxy
     httpMethod: POST
     uri: "arn:aws:apigateway:$${AWS::Region}:lambda:path/2015-03-31/functions/${user_lambda_arn}/invocations"
     passthroughBehavior: when_no_match
-    contentHandling: CONVERT_TO_TEXT
-    responses: *cors-integration-response
 
   auth-lambda-integration: &auth-lambda-integration
     type: aws_proxy
     httpMethod: POST
     uri: "arn:aws:apigateway:$${AWS::Region}:lambda:path/2015-03-31/functions/${auth_lambda_arn}/invocations"
     passthroughBehavior: when_no_match
-    contentHandling: CONVERT_TO_TEXT
 
 paths:
   # Auth endpoints (no authentication required)
@@ -202,7 +178,6 @@ paths:
       responses:
         '200':
           description: User profile retrieved successfully
-          headers: *cors-response-headers
           content:
             application/json:
               schema:
@@ -231,7 +206,6 @@ paths:
       responses:
         '202':
           description: Sync initiated successfully
-          headers: *cors-response-headers
           content:
             application/json:
               schema:
@@ -261,7 +235,6 @@ paths:
       responses:
         '200':
           description: Sync status retrieved successfully
-          headers: *cors-response-headers
           content:
             application/json:
               schema:

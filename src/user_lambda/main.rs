@@ -10,7 +10,7 @@ mod utils;
 
 use sync::handle_get_sync_status;
 use user::handle_get_user_profile;
-use utils::{create_error_response, extract_user_id_from_context};
+use utils::{create_error_response_with_headers, extract_user_id_from_context};
 
 async fn function_handler(
     event: LambdaEvent<ApiGatewayProxyRequest>,
@@ -31,20 +31,25 @@ async fn function_handler(
         Err(e) => {
             error!("Failed to extract user ID: {}", e);
             metrics::increment_lambda_failure();
-            return Ok(create_error_response(
+            return Ok(create_error_response_with_headers(
                 401,
                 "Invalid or missing authentication",
+                &request.headers,
             ));
         }
     };
 
     let result = match (method.as_str(), path.as_str()) {
-        ("GET", "/user") => handle_get_user_profile(user_id).await,
-        ("GET", "/sync/status") => handle_get_sync_status(user_id).await,
+        ("GET", "/user") => handle_get_user_profile(user_id, &request.headers).await,
+        ("GET", "/sync/status") => handle_get_sync_status(user_id, &request.headers).await,
         _ => {
             error!("Unknown route: {} {}", method, path);
             metrics::increment_lambda_failure();
-            Ok(create_error_response(404, "Not found"))
+            Ok(create_error_response_with_headers(
+                404,
+                "Not found",
+                &request.headers,
+            ))
         }
     };
 
@@ -54,7 +59,11 @@ async fn function_handler(
         Err(e) => {
             error!("Endpoint handler error: {}", e);
             metrics::increment_lambda_failure();
-            Ok(create_error_response(500, "Internal server error"))
+            Ok(create_error_response_with_headers(
+                500,
+                "Internal server error",
+                &request.headers,
+            ))
         }
     }
 }

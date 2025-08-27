@@ -9,9 +9,12 @@ use ridelines_drivetrain::{
 use std::env;
 use tracing::info;
 
-use crate::utils::create_json_response;
+use crate::utils::create_json_response_with_headers;
 
-pub async fn handle_get_sync_status(user_id: String) -> Result<ApiGatewayProxyResponse, Error> {
+pub async fn handle_get_sync_status(
+    user_id: String,
+    request_headers: &aws_lambda_events::http::HeaderMap,
+) -> Result<ApiGatewayProxyResponse, Error> {
     info!("Getting sync status for user: {}", user_id);
 
     let users_table =
@@ -51,5 +54,9 @@ pub async fn handle_get_sync_status(user_id: String) -> Result<ApiGatewayProxyRe
     info!("Sync status retrieved successfully");
     metrics::increment_lambda_success();
 
-    Ok(create_json_response(200, &response))
+    Ok(create_json_response_with_headers(
+        200,
+        &response,
+        request_headers,
+    ))
 }
