@@ -5,20 +5,14 @@ use serde_json::json;
 use tracing::error;
 
 pub fn extract_user_id_from_context(request: &ApiGatewayProxyRequest) -> Result<String, Error> {
-    // API Gateway JWT authorizer adds claims to request context
-    let jwt_claims = &request
+    request
         .request_context
         .authorizer
-        .jwt
-        .as_ref()
-        .ok_or_else(|| Error::from("Missing JWT authorizer context"))?
-        .claims;
-
-    let user_id = jwt_claims
-        .get("sub")
-        .ok_or_else(|| Error::from("Missing 'sub' claim in JWT"))?;
-
-    Ok(user_id.to_string())
+        .fields
+        .get("userId")
+        .and_then(|v| v.as_str())
+        .map(|s| s.to_string())
+        .ok_or_else(|| Error::from("Missing or invalid 'userId' in authorizer context"))
 }
 
 pub fn create_json_response<T: serde::Serialize>(
