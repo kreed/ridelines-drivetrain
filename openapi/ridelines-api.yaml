@@ -30,7 +30,7 @@ x-cors-templates:
         type: string
 
   cors-response-params: &cors-response-params
-    method.response.header.Access-Control-Allow-Origin: "#if($input.params('Origin') == 'http://localhost:5173')http://localhost:5173#{else}${frontend_origin}#{end}"
+    method.response.header.Access-Control-Allow-Origin: "'${frontend_origin}'"
     method.response.header.Access-Control-Allow-Methods: "'GET,POST,OPTIONS'"
     method.response.header.Access-Control-Allow-Headers: "'Content-Type,X-Amz-Date,Authorization,X-Api-Key,X-Amz-Security-Token,Cookie'"
     method.response.header.Access-Control-Allow-Credentials: "'true'"
@@ -58,7 +58,7 @@ x-cors-templates:
     default:
       statusCode: 200
       responseParameters:
-        method.response.header.Access-Control-Allow-Origin: "#if($input.params('Origin') == 'http://localhost:5173')http://localhost:5173#{else}${frontend_origin}#{end}"
+        method.response.header.Access-Control-Allow-Origin: "'${frontend_origin}'"
         method.response.header.Access-Control-Allow-Credentials: "'true'"
 
 # Common response templates
