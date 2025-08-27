@@ -404,3 +404,28 @@ tags:
     description: User profile and data endpoints
   - name: Sync
     description: Activity synchronization endpoints
+
+# Gateway Responses for CORS headers on API Gateway errors
+x-amazon-apigateway-gateway-responses:
+  UNAUTHORIZED:
+    responseParameters:
+      gatewayresponse.header.Access-Control-Allow-Origin: "'${frontend_origin}'"
+      gatewayresponse.header.Access-Control-Allow-Credentials: "'true'"
+    responseTemplates:
+      application/json: |
+        {"error": "Unauthorized"}
+  ACCESS_DENIED:
+    responseParameters:
+      gatewayresponse.header.Access-Control-Allow-Origin: "'${frontend_origin}'"
+      gatewayresponse.header.Access-Control-Allow-Credentials: "'true'"
+    responseTemplates:
+      application/json: |
+        {"error": "Access denied"}
+  DEFAULT_4XX:
+    responseParameters:
+      gatewayresponse.header.Access-Control-Allow-Origin: "'${frontend_origin}'"
+      gatewayresponse.header.Access-Control-Allow-Credentials: "'true'"
+  DEFAULT_5XX:
+    responseParameters:
+      gatewayresponse.header.Access-Control-Allow-Origin: "'${frontend_origin}'"
+      gatewayresponse.header.Access-Control-Allow-Credentials: "'true'"
