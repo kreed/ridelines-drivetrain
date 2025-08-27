@@ -10,12 +10,9 @@ use ridelines_drivetrain::{
 use std::env;
 use tracing::info;
 
-use crate::utils::create_json_response_with_headers;
+use crate::utils::create_json_response;
 
-pub async fn handle_get_user_profile(
-    user_id: String,
-    request_headers: &aws_lambda_events::http::HeaderMap,
-) -> Result<ApiGatewayProxyResponse, Error> {
+pub async fn handle_get_user_profile(user_id: String) -> Result<ApiGatewayProxyResponse, Error> {
     info!("Getting user profile for user: {}", user_id);
 
     let users_table =
@@ -82,9 +79,5 @@ pub async fn handle_get_user_profile(
     info!("User profile retrieved successfully");
     metrics::increment_lambda_success();
 
-    Ok(create_json_response_with_headers(
-        200,
-        &response,
-        request_headers,
-    ))
+    Ok(create_json_response(200, &response))
 }
