@@ -423,23 +423,6 @@ components:
           description: Additional error details
           example: "State parameter not found or expired"
 
-# AWS API Gateway CORS configuration
-x-amazon-apigateway-cors:
-  allowOrigins:
-    - "${frontend_origin}"
-    - "http://localhost:5173"
-  allowHeaders:
-    - "Content-Type"
-    - "X-Amz-Date"
-    - "Authorization"
-    - "X-Api-Key"
-    - "X-Amz-Security-Token"
-    - "Cookie"
-  allowMethods:
-    - "GET"
-    - "POST"
-    - "OPTIONS"
-  allowCredentials: true
 
 tags:
   - name: Authentication
