@@ -100,7 +100,7 @@ x-integration-templates:
   user-lambda-integration: &user-lambda-integration
     type: aws_proxy
     httpMethod: POST
-    uri: "arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${user_lambda_arn}/invocations"
+    uri: "arn:aws:apigateway:$${AWS::Region}:lambda:path/2015-03-31/functions/${user_lambda_arn}/invocations"
     passthroughBehavior: when_no_match
     contentHandling: CONVERT_TO_TEXT
     responses: *cors-integration-response
@@ -108,7 +108,7 @@ x-integration-templates:
   auth-lambda-integration: &auth-lambda-integration
     type: aws_proxy
     httpMethod: POST
-    uri: "arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${auth_lambda_arn}/invocations"
+    uri: "arn:aws:apigateway:$${AWS::Region}:lambda:path/2015-03-31/functions/${auth_lambda_arn}/invocations"
     passthroughBehavior: when_no_match
     contentHandling: CONVERT_TO_TEXT
 
