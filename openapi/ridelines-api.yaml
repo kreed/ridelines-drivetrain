@@ -13,6 +13,53 @@ servers:
   - url: https://api.dev.ridelines.xyz
     description: Development API
 
+# YAML anchors for CORS templates
+x-cors-templates:
+  cors-headers: &cors-headers
+    Access-Control-Allow-Origin:
+      schema:
+        type: string
+    Access-Control-Allow-Methods:
+      schema:
+        type: string
+    Access-Control-Allow-Headers:
+      schema:
+        type: string
+    Access-Control-Allow-Credentials:
+      schema:
+        type: string
+
+  cors-response-params: &cors-response-params
+    method.response.header.Access-Control-Allow-Origin: "$input.params('Origin') == 'http://localhost:5173' ? 'http://localhost:5173' : '${frontend_origin}'"
+    method.response.header.Access-Control-Allow-Methods: "'GET,POST,OPTIONS'"
+    method.response.header.Access-Control-Allow-Headers: "'Content-Type,X-Amz-Date,Authorization,X-Api-Key,X-Amz-Security-Token,Cookie'"
+    method.response.header.Access-Control-Allow-Credentials: "'true'"
+
+  cors-options-integration: &cors-options-integration
+    type: mock
+    requestTemplates:
+      application/json: '{"statusCode": 200}'
+    responses:
+      default:
+        statusCode: 200
+        responseParameters: *cors-response-params
+        responseTemplates:
+          application/json: '{}'
+
+  cors-response-headers: &cors-response-headers
+    Access-Control-Allow-Origin:
+      schema:
+        type: string
+    Access-Control-Allow-Credentials:
+      schema:
+        type: string
+
+  cors-integration-response: &cors-integration-response
+    default:
+      responseParameters:
+        method.response.header.Access-Control-Allow-Origin: "$input.params('Origin') == 'http://localhost:5173' ? 'http://localhost:5173' : '${frontend_origin}'"
+        method.response.header.Access-Control-Allow-Credentials: "'true'"
+
 paths:
   # Auth endpoints (no authentication required)
   /auth/login:
@@ -109,6 +156,14 @@ paths:
 
   # Protected endpoints (require JWT authentication)
   /user:
+    options:
+      summary: CORS preflight for /user
+      description: Handle CORS preflight request
+      responses:
+        '200':
+          description: CORS preflight response
+          headers: *cors-headers
+      x-amazon-apigateway-integration: *cors-options-integration
     get:
       summary: Get user profile and PMTiles URL
       description: Retrieve authenticated user's profile and activity data URL
@@ -120,18 +175,21 @@ paths:
       responses:
         '200':
           description: User profile retrieved successfully
+          headers: *cors-response-headers
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/UserProfileResponse'
         '401':
           description: Authentication required or invalid token
+          headers: *cors-response-headers
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
         '500':
           description: Internal server error
+          headers: *cors-response-headers
           content:
             application/json:
               schema:
@@ -142,8 +200,17 @@ paths:
         uri: "arn:aws:apigateway:$${AWS::Region}:lambda:path/2015-03-31/functions/${user_lambda_arn}/invocations"
         passthroughBehavior: when_no_match
         contentHandling: CONVERT_TO_TEXT
+        responses: *cors-integration-response
 
   /sync:
+    options:
+      summary: CORS preflight for /sync
+      description: Handle CORS preflight request
+      responses:
+        '200':
+          description: CORS preflight response
+          headers: *cors-headers
+      x-amazon-apigateway-integration: *cors-options-integration
     post:
       summary: Trigger activity sync
       description: Start synchronization of activities from intervals.icu for authenticated user
@@ -185,6 +252,14 @@ paths:
         contentHandling: CONVERT_TO_TEXT
 
   /sync/status:
+    options:
+      summary: CORS preflight for /sync/status
+      description: Handle CORS preflight request
+      responses:
+        '200':
+          description: CORS preflight response
+          headers: *cors-headers
+      x-amazon-apigateway-integration: *cors-options-integration
     get:
       summary: Get sync status
       description: Retrieve current synchronization status for authenticated user
@@ -382,11 +457,12 @@ x-amazon-apigateway-cors:
     - "Authorization"
     - "X-Api-Key"
     - "X-Amz-Security-Token"
+    - "Cookie"
   allowMethods:
     - "GET"
     - "POST"
     - "OPTIONS"
-  allowCredentials: false
+  allowCredentials: true
 
 tags:
   - name: Authentication
