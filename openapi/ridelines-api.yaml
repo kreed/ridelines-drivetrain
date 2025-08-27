@@ -60,6 +60,57 @@ x-cors-templates:
         method.response.header.Access-Control-Allow-Origin: "$input.params('Origin') == 'http://localhost:5173' ? 'http://localhost:5173' : '${frontend_origin}'"
         method.response.header.Access-Control-Allow-Credentials: "'true'"
 
+# Common response templates
+x-response-templates:
+  error-401: &error-401
+    description: Authentication required or invalid token
+    headers: *cors-response-headers
+    content:
+      application/json:
+        schema:
+          $ref: '#/components/schemas/ErrorResponse'
+
+  error-400: &error-400
+    description: Invalid or missing parameters
+    headers: *cors-response-headers
+    content:
+      application/json:
+        schema:
+          $ref: '#/components/schemas/ErrorResponse'
+
+  error-409: &error-409
+    description: Sync already in progress for user
+    headers: *cors-response-headers
+    content:
+      application/json:
+        schema:
+          $ref: '#/components/schemas/ErrorResponse'
+
+  error-500: &error-500
+    description: Internal server error
+    headers: *cors-response-headers
+    content:
+      application/json:
+        schema:
+          $ref: '#/components/schemas/ErrorResponse'
+
+# Common integration templates
+x-integration-templates:
+  user-lambda-integration: &user-lambda-integration
+    type: aws_proxy
+    httpMethod: POST
+    uri: "arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${user_lambda_arn}/invocations"
+    passthroughBehavior: when_no_match
+    contentHandling: CONVERT_TO_TEXT
+    responses: *cors-integration-response
+
+  auth-lambda-integration: &auth-lambda-integration
+    type: aws_proxy
+    httpMethod: POST
+    uri: "arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${auth_lambda_arn}/invocations"
+    passthroughBehavior: when_no_match
+    contentHandling: CONVERT_TO_TEXT
+
 paths:
   # Auth endpoints (no authentication required)
   /auth/login:
@@ -86,18 +137,8 @@ paths:
                 type: string
                 format: uri
                 example: "https://intervals.icu/oauth/authorize?response_type=code&client_id=..."
-        '500':
-          description: Internal server error
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorResponse'
-      x-amazon-apigateway-integration:
-        type: aws_proxy
-        httpMethod: POST
-        uri: "arn:aws:apigateway:$${AWS::Region}:lambda:path/2015-03-31/functions/${auth_lambda_arn}/invocations"
-        passthroughBehavior: when_no_match
-        contentHandling: CONVERT_TO_TEXT
+        '500': *error-500
+      x-amazon-apigateway-integration: *auth-lambda-integration
 
   /auth/callback:
     get:
@@ -135,24 +176,9 @@ paths:
               schema:
                 type: string
                 example: "ridelines_auth=eyJ...; HttpOnly; Secure; SameSite=Strict"
-        '400':
-          description: Invalid or missing parameters
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorResponse'
-        '500':
-          description: Internal server error
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorResponse'
-      x-amazon-apigateway-integration:
-        type: aws_proxy
-        httpMethod: POST
-        uri: "arn:aws:apigateway:$${AWS::Region}:lambda:path/2015-03-31/functions/${auth_lambda_arn}/invocations"
-        passthroughBehavior: when_no_match
-        contentHandling: CONVERT_TO_TEXT
+        '400': *error-400
+        '500': *error-500
+      x-amazon-apigateway-integration: *auth-lambda-integration
 
   # Protected endpoints (require JWT authentication)
   /user:
@@ -180,27 +206,9 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/UserProfileResponse'
-        '401':
-          description: Authentication required or invalid token
-          headers: *cors-response-headers
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorResponse'
-        '500':
-          description: Internal server error
-          headers: *cors-response-headers
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorResponse'
-      x-amazon-apigateway-integration:
-        type: aws_proxy
-        httpMethod: POST
-        uri: "arn:aws:apigateway:$${AWS::Region}:lambda:path/2015-03-31/functions/${user_lambda_arn}/invocations"
-        passthroughBehavior: when_no_match
-        contentHandling: CONVERT_TO_TEXT
-        responses: *cors-integration-response
+        '401': *error-401
+        '500': *error-500
+      x-amazon-apigateway-integration: *user-lambda-integration
 
   /sync:
     options:
@@ -222,34 +230,15 @@ paths:
       responses:
         '202':
           description: Sync initiated successfully
+          headers: *cors-response-headers
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/SyncResponse'
-        '401':
-          description: Authentication required or invalid token
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorResponse'
-        '409':
-          description: Sync already in progress for user
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorResponse'
-        '500':
-          description: Internal server error
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorResponse'
-      x-amazon-apigateway-integration:
-        type: aws_proxy
-        httpMethod: POST
-        uri: "arn:aws:apigateway:$${AWS::Region}:lambda:path/2015-03-31/functions/${user_lambda_arn}/invocations"
-        passthroughBehavior: when_no_match
-        contentHandling: CONVERT_TO_TEXT
+        '401': *error-401
+        '409': *error-409
+        '500': *error-500
+      x-amazon-apigateway-integration: *user-lambda-integration
 
   /sync/status:
     options:
@@ -271,28 +260,14 @@ paths:
       responses:
         '200':
           description: Sync status retrieved successfully
+          headers: *cors-response-headers
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/SyncStatusResponse'
-        '401':
-          description: Authentication required or invalid token
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorResponse'
-        '500':
-          description: Internal server error
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorResponse'
-      x-amazon-apigateway-integration:
-        type: aws_proxy
-        httpMethod: POST
-        uri: "arn:aws:apigateway:$${AWS::Region}:lambda:path/2015-03-31/functions/${user_lambda_arn}/invocations"
-        passthroughBehavior: when_no_match
-        contentHandling: CONVERT_TO_TEXT
+        '401': *error-401
+        '500': *error-500
+      x-amazon-apigateway-integration: *user-lambda-integration
 
 components:
   securitySchemes:
