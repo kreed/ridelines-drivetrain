@@ -10,6 +10,8 @@ use function_timer::time;
 use std::env;
 use tempdir::TempDir;
 
+use clerk_rs::apis::users_api::User as ClerkUser;
+use clerk_rs::{ClerkConfiguration, clerk::Clerk};
 use ridelines_drivetrain::common::{intervals_client::IntervalsClient, metrics, types::User};
 
 #[derive(Debug, Deserialize, Serialize)]
@@ -84,9 +86,12 @@ pub(crate) async fn function_handler(event: LambdaEvent<SyncRequest>) -> Result<
     let work_dir = TempDir::new(&format!("intervals_mapper_{}", user.athlete_id))
         .map_err(|e| Error::from(format!("Failed to create work directory: {e}")))?;
 
+    // Get intervals.icu access token from Clerk
+    let access_token = get_intervals_access_token_from_clerk(user_id).await?;
+
     // Create IntervalsClient with access token
     let mut intervals_client = IntervalsClient::new();
-    intervals_client.set_access_token(&user.intervals_access_token);
+    intervals_client.set_access_token(&access_token);
 
     // Sync activities and get path to concatenated GeoJSON file
     let sync_job = ActivitySync::new(
@@ -131,4 +136,30 @@ pub(crate) async fn function_handler(event: LambdaEvent<SyncRequest>) -> Result<
     // Record successful Lambda execution
     metrics::increment_lambda_success();
     Ok(())
+}
+
+async fn get_intervals_access_token_from_clerk(user_id: &str) -> Result<String, Error> {
+    let clerk_secret_key = env::var("CLERK_SECRET_KEY")
+        .map_err(|_| Error::from("CLERK_SECRET_KEY environment variable not set"))?;
+
+    let config = ClerkConfiguration::new(None, None, Some(clerk_secret_key), None);
+    let clerk = Clerk::new(config);
+
+    // Get OAuth access token for intervals.icu using Clerk API
+    let oauth_tokens =
+        ClerkUser::get_o_auth_access_token(&clerk, user_id, "oauth_custom_intervals_icu")
+            .await
+            .map_err(|e| {
+                Error::from(format!("Failed to get intervals.icu token from Clerk: {e}"))
+            })?;
+
+    let access_token = oauth_tokens
+        .first()
+        .ok_or_else(|| Error::from("No intervals.icu token found in Clerk"))?
+        .token
+        .as_ref()
+        .ok_or_else(|| Error::from("Token field is empty"))?
+        .clone();
+
+    Ok(access_token)
 }

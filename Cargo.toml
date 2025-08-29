@@ -13,10 +13,6 @@ name = "sync_lambda"
 path = "src/sync_lambda/main.rs"
 
 [[bin]]
-name = "auth_lambda"
-path = "src/auth_lambda/main.rs"
-
-[[bin]]
 name = "user_lambda"
 path = "src/user_lambda/main.rs"
 
@@ -24,8 +20,11 @@ path = "src/user_lambda/main.rs"
 name = "auth_verify_lambda"
 path = "src/auth_verify_lambda/main.rs"
 
+[[bin]]
+name = "auth_user_info_lambda"
+path = "src/auth_user_info_lambda/main.rs"
+
 [dependencies]
-# Existing dependencies for sync Lambda
 reqwest = { version = "0.12.22", features = ["rustls-tls"], default-features = false }
 reqwest-retry = "0.7.0"
 reqwest-middleware = "0.4.2"
@@ -57,13 +56,12 @@ zstd = "0.13"
 chrono = { version = "0.4", features = ["serde"], default-features = false }
 anyhow = "1.0"
 tempdir = "0.3"
-
-# Additional dependencies for auth Lambda
 http = "1.0"
 urlencoding = "2.1"
 uuid = { version = "1.0", features = ["v4", "serde"] }
 rand = "0.9"
 sha2 = "0.10"
+clerk-rs = "0.4.1"
 
 [build-dependencies]
 typify = "0.4"

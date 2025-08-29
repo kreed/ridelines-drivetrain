@@ -65,8 +65,7 @@ pub async fn handle_get_user_profile(user_id: String) -> Result<ApiGatewayProxyR
 
     let response = UserProfileResponse {
         user: ridelines_drivetrain::api::UserProfile {
-            id: uuid::Uuid::parse_str(&user.id)
-                .map_err(|e| Error::from(format!("Invalid user ID format: {e}")))?,
+            id: uuid::Uuid::new_v4(), // Generate a UUID for API compatibility
             athlete_id: user.athlete_id,
             name: user.name,
             email: user.email,

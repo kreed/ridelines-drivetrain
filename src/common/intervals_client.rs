@@ -81,6 +81,14 @@ pub struct IntervalsUserProfile {
     pub id: String,
     pub name: String,
     pub email: Option<String>,
+    pub profile_medium: Option<String>,
+    pub city: Option<String>,
+    pub state: Option<String>,
+    pub country: Option<String>,
+    pub timezone: Option<String>,
+    pub sex: Option<String>,
+    pub bio: Option<String>,
+    pub website: Option<String>,
 }
 
 #[derive(Deserialize)]

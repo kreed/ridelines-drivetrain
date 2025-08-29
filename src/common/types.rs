@@ -5,14 +5,14 @@ use std::fmt;
 // DynamoDB User table record
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct User {
-    pub id: String,
+    pub id: String, // Now Clerk user ID (e.g. "user_xxxx")
     pub athlete_id: String,
     pub name: Option<String>,
     pub email: Option<String>,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
     pub last_login: DateTime<Utc>,
-    pub intervals_access_token: String,
+    // intervals_access_token removed - now stored in Clerk user metadata
 }
 
 // DynamoDB OAuth state table record

@@ -1,18 +1,19 @@
-use aws_config::BehaviorVersion;
 use aws_lambda_events::apigw::{
     ApiGatewayCustomAuthorizerPolicy, ApiGatewayCustomAuthorizerRequestTypeRequest,
     ApiGatewayCustomAuthorizerResponse,
 };
 use aws_lambda_events::event::iam::{IamPolicyEffect, IamPolicyStatement};
-use aws_sdk_kms::Client as KmsClient;
+use clerk_rs::apis::configuration::ClerkConfiguration;
+use clerk_rs::clerk::Clerk;
+use clerk_rs::validators::authorizer::{ClerkJwt, validate_jwt};
+use clerk_rs::validators::jwks::MemoryCacheJwksProvider;
 use lambda_runtime::{Error, LambdaEvent};
 use metrics_cloudwatch_embedded::lambda::handler::run;
 use ridelines_drivetrain::common::metrics;
 use std::collections::HashMap;
 use std::env;
+use std::sync::Arc;
 use tracing::{error, info, info_span};
-
-use ridelines_drivetrain::common::jwt::{JwtClaims, verify_jwt_token};
 
 async fn function_handler(
     event: LambdaEvent<ApiGatewayCustomAuthorizerRequestTypeRequest>,
@@ -28,23 +29,26 @@ async fn handle_api_gateway_authorizer(
 ) -> Result<ApiGatewayCustomAuthorizerResponse, Error> {
     info!("Processing API Gateway authorization request");
 
-    // Extract JWT from Cookie header
-    let cookie_header = request
+    // Extract JWT from Authorization header (Bearer token)
+    let auth_header = request
         .headers
-        .get("cookie")
-        .or_else(|| request.headers.get("Cookie"))
+        .get("authorization")
+        .or_else(|| request.headers.get("Authorization"))
         .and_then(|v| v.to_str().ok())
-        .unwrap_or("");
+        .ok_or_else(|| {
+            info!("No Authorization header found");
+            Error::from("Unauthorized")
+        })?;
 
-    let jwt_token = extract_jwt_from_cookie(cookie_header).ok_or_else(|| {
-        info!("No JWT token found in cookies");
+    let jwt_token = auth_header.strip_prefix("Bearer ").ok_or_else(|| {
+        info!("Authorization header missing Bearer prefix");
         Error::from("Unauthorized")
     })?;
 
-    // Verify JWT
-    let claims = verify_jwt(jwt_token).await?;
+    // Verify Clerk JWT
+    let claims = verify_clerk_jwt(jwt_token).await?;
 
-    info!("JWT verified successfully for user: {}", claims.sub);
+    info!("Clerk JWT verified successfully for user: {}", claims.sub);
     metrics::increment_lambda_success();
 
     // Create policy document
@@ -64,10 +68,6 @@ async fn handle_api_gateway_authorizer(
         "userId".to_string(),
         serde_json::Value::String(claims.sub.clone()),
     );
-    context_map.insert(
-        "athleteId".to_string(),
-        serde_json::Value::String(claims.athlete_id.clone()),
-    );
 
     Ok(ApiGatewayCustomAuthorizerResponse {
         principal_id: Some(claims.sub),
@@ -77,31 +77,28 @@ async fn handle_api_gateway_authorizer(
     })
 }
 
-async fn verify_jwt(token: &str) -> Result<JwtClaims, Error> {
-    // Get KMS key ID from environment
-    let jwt_kms_key_id =
-        env::var("JWT_KMS_KEY_ID").map_err(|_| Error::from("JWT_KMS_KEY_ID not set"))?;
+async fn verify_clerk_jwt(token: &str) -> Result<ClerkJwt, Error> {
+    // Get Clerk publishable key from environment to construct JWKS URL
+    let clerk_secret_key =
+        env::var("CLERK_SECRET_KEY").map_err(|_| Error::from("CLERK_SECRET_KEY not set"))?;
 
-    // Initialize AWS clients
-    let config = aws_config::load_defaults(BehaviorVersion::latest()).await;
-    let kms_client = KmsClient::new(&config);
+    let config = ClerkConfiguration::new(None, None, Some(clerk_secret_key.to_owned()), None);
+    let client = Clerk::new(config);
 
-    // Verify JWT token
-    verify_jwt_token(token, &jwt_kms_key_id, &kms_client)
-        .await
-        .map_err(|e| {
-            error!("JWT verification failed: {}", e);
-            Error::from("Unauthorized")
-        })
+    // Create JWKS provider
+    let jwks = Arc::new(MemoryCacheJwksProvider::new(client));
+
+    // Validate the JWT using clerk-rs
+    let clerk_jwt = validate_jwt(token, jwks).await.map_err(|e| {
+        error!("Clerk JWT verification failed: {}", e);
+        Error::from("Unauthorized")
+    })?;
+
+    info!("Clerk JWT validated for user: {}", clerk_jwt.sub);
+    Ok(clerk_jwt)
 }
 
-fn extract_jwt_from_cookie(cookie_header: &str) -> Option<&str> {
-    cookie_header
-        .split(';')
-        .map(|cookie| cookie.trim())
-        .find(|cookie| cookie.starts_with("ridelines_auth="))
-        .and_then(|cookie| cookie.strip_prefix("ridelines_auth="))
-}
+// Cookie extraction no longer needed - using Authorization header with Clerk
 
 #[tokio::main]
 async fn main() -> Result<(), Error> {

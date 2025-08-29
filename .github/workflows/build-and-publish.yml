@@ -82,7 +82,7 @@ jobs:
         with:
           name: lambda-artifacts
           path: |
-            target/lambda/auth_lambda/bootstrap.zip
+            target/lambda/auth_user_info_lambda/bootstrap.zip
             target/lambda/auth_verify_lambda/bootstrap.zip
             target/lambda/user_lambda/bootstrap.zip
             target/lambda/sync_lambda/bootstrap.zip
@@ -115,7 +115,7 @@ jobs:
         run: |
           cat > Dockerfile.lambda << 'EOF'
           FROM scratch
-          COPY artifacts/target/lambda/auth_lambda/bootstrap.zip /auth-lambda-package.zip
+          COPY artifacts/target/lambda/auth_user_info_lambda/bootstrap.zip /auth-user-info-lambda-package.zip
           COPY artifacts/target/lambda/auth_verify_lambda/bootstrap.zip /auth-verify-lambda-package.zip
           COPY artifacts/target/lambda/user_lambda/bootstrap.zip /user-lambda-package.zip
           COPY artifacts/target/lambda/sync_lambda/bootstrap.zip /sync-lambda-package.zip
@@ -173,7 +173,7 @@ jobs:
 
           # Define lambdas with their descriptions
           declare -A lambdas=(
-            ["auth_lambda"]="OAuth flow"
+            ["auth_user_info_lambda"]="User info for Clerk OAuth"
             ["auth_verify_lambda"]="Custom authorizer"
             ["user_lambda"]="Protected APIs"
             ["sync_lambda"]="Activity processing"

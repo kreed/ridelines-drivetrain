@@ -82,80 +82,40 @@ x-integration-templates:
     uri: "arn:aws:apigateway:$${AWS::Region}:lambda:path/2015-03-31/functions/${user_lambda_arn}/invocations"
     passthroughBehavior: when_no_match
 
-  auth-lambda-integration: &auth-lambda-integration
+  auth-user-info-lambda-integration: &auth-user-info-lambda-integration
     type: aws_proxy
     httpMethod: POST
-    uri: "arn:aws:apigateway:$${AWS::Region}:lambda:path/2015-03-31/functions/${auth_lambda_arn}/invocations"
+    uri: "arn:aws:apigateway:$${AWS::Region}:lambda:path/2015-03-31/functions/${auth_user_info_lambda_arn}/invocations"
     passthroughBehavior: when_no_match
 
 paths:
-  # Auth endpoints (no authentication required)
-  /auth/login:
+  # Auth endpoint for Clerk custom OAuth provider
+  /auth/user-info:
     get:
-      summary: Initiate OAuth login flow
-      description: Redirect user to intervals.icu OAuth authorization page
-      operationId: loginStart
+      summary: Get user info for Clerk OAuth provider
+      description: Return user claims for Clerk's custom OAuth provider
+      operationId: getUserInfo
       tags:
         - Authentication
       parameters:
-        - name: redirect_path
-          in: query
-          description: Optional path to redirect to after successful authentication
-          schema:
-            type: string
-            example: "/dashboard"
-      responses:
-        '302':
-          description: Redirect to intervals.icu OAuth authorization page
-          headers:
-            Location:
-              description: OAuth authorization URL
-              schema:
-                type: string
-                format: uri
-                example: "https://intervals.icu/oauth/authorize?response_type=code&client_id=..."
-        '500': *error-500
-      x-amazon-apigateway-integration: *auth-lambda-integration
-
-  /auth/callback:
-    get:
-      summary: Complete OAuth login flow
-      description: Exchange authorization code for JWT token and redirect to frontend
-      operationId: loginCallback
-      tags:
-        - Authentication
-      parameters:
-        - name: code
-          in: query
+        - name: Authorization
+          in: header
           required: true
-          description: Authorization code from intervals.icu
+          description: Bearer token from intervals.icu
           schema:
             type: string
-        - name: state
-          in: query
-          required: true
-          description: State parameter for CSRF protection
-          schema:
-            type: string
-            format: uuid
+            example: "Bearer intervals_access_token"
       responses:
-        '302':
-          description: Authentication successful, redirect to frontend
-          headers:
-            Location:
-              description: Frontend URL to redirect to
+        '200':
+          description: User claims retrieved successfully
+          content:
+            application/json:
               schema:
-                type: string
-                format: uri
-                example: "https://ridelines.xyz/dashboard"
-            Set-Cookie:
-              description: JWT authentication cookie
-              schema:
-                type: string
-                example: "ridelines_auth=eyJ...; HttpOnly; Secure; SameSite=Strict"
-        '400': *error-400
+                $ref: '#/components/schemas/UserClaims'
+        '401':
+          description: Missing or invalid Authorization header
         '500': *error-500
-      x-amazon-apigateway-integration: *auth-lambda-integration
+      x-amazon-apigateway-integration: *auth-user-info-lambda-integration
 
   # Protected endpoints (require JWT authentication)
   /user:
@@ -283,6 +243,71 @@ components:
           format: uuid
           description: State parameter for CSRF protection
           example: "550e8400-e29b-41d4-a716-446655440000"
+
+    # Auth Types
+    UserClaims:
+      type: object
+      required:
+        - sub
+        - name
+      properties:
+        sub:
+          type: string
+          description: User ID from intervals.icu
+          example: "i12345"
+        email:
+          type: string
+          format: email
+          nullable: true
+          description: User email address
+          example: "user@example.com"
+        name:
+          type: string
+          description: User display name
+          example: "John Doe"
+        picture:
+          type: string
+          format: uri
+          nullable: true
+          description: User profile picture URL
+          example: "https://intervals.icu/api/v1/athlete/12345/profile-medium.jpg"
+        city:
+          type: string
+          nullable: true
+          description: User's city
+          example: "San Francisco"
+        state:
+          type: string
+          nullable: true
+          description: User's state
+          example: "CA"
+        country:
+          type: string
+          nullable: true
+          description: User's country
+          example: "USA"
+        timezone:
+          type: string
+          nullable: true
+          description: User's timezone
+          example: "America/Los_Angeles"
+        sex:
+          type: string
+          nullable: true
+          description: User's gender
+          example: "M"
+        bio:
+          type: string
+          nullable: true
+          description: User's biography
+          example: "Cyclist and runner from SF"
+        website:
+          type: string
+          format: uri
+          nullable: true
+          description: User's website URL
+          example: "https://example.com"
+
     # User Types
     UserProfile:
       type: object
