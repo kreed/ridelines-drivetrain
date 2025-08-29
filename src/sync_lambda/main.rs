@@ -10,6 +10,7 @@ use function_timer::time;
 use std::env;
 use tempdir::TempDir;
 
+use clerk_rs::apis::configuration::ApiKey;
 use clerk_rs::apis::users_api::User as ClerkUser;
 use clerk_rs::{ClerkConfiguration, clerk::Clerk};
 use ridelines_drivetrain::common::{intervals_client::IntervalsClient, metrics, types::User};
@@ -142,7 +143,11 @@ async fn get_intervals_access_token_from_clerk(user_id: &str) -> Result<String, 
     let clerk_secret_key = env::var("CLERK_SECRET_KEY")
         .map_err(|_| Error::from("CLERK_SECRET_KEY environment variable not set"))?;
 
-    let config = ClerkConfiguration::new(None, None, Some(clerk_secret_key), None);
+    let api_key = ApiKey {
+        prefix: None,
+        key: clerk_secret_key,
+    };
+    let config = ClerkConfiguration::new(None, None, None, Some(api_key));
     let clerk = Clerk::new(config);
 
     // Get OAuth access token for intervals.icu using Clerk API

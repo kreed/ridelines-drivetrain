@@ -3,7 +3,7 @@ use aws_lambda_events::apigw::{
     ApiGatewayCustomAuthorizerResponse,
 };
 use aws_lambda_events::event::iam::{IamPolicyEffect, IamPolicyStatement};
-use clerk_rs::apis::configuration::ClerkConfiguration;
+use clerk_rs::apis::configuration::{ApiKey, ClerkConfiguration};
 use clerk_rs::clerk::Clerk;
 use clerk_rs::validators::authorizer::{ClerkJwt, validate_jwt};
 use clerk_rs::validators::jwks::MemoryCacheJwksProvider;
@@ -82,7 +82,11 @@ async fn verify_clerk_jwt(token: &str) -> Result<ClerkJwt, Error> {
     let clerk_secret_key =
         env::var("CLERK_SECRET_KEY").map_err(|_| Error::from("CLERK_SECRET_KEY not set"))?;
 
-    let config = ClerkConfiguration::new(None, None, Some(clerk_secret_key.to_owned()), None);
+    let api_key = ApiKey {
+        prefix: None,
+        key: clerk_secret_key,
+    };
+    let config = ClerkConfiguration::new(None, None, None, Some(api_key));
     let client = Clerk::new(config);
 
     // Create JWKS provider
