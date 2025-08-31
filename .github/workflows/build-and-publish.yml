@@ -111,7 +111,7 @@ jobs:
         run: |
           cat > Dockerfile.lambda << 'EOF'
           FROM scratch
-          COPY artifacts/target/lambda/sync_lambda/bootstrap.zip /sync-lambda-package.zip
+          COPY artifacts/bootstrap.zip /sync-lambda-package.zip
           EOF
 
       - name: Log in to Container Registry
