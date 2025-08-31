@@ -7,22 +7,9 @@ edition = "2024"
 name = "ridelines_drivetrain"
 path = "src/lib.rs"
 
-# Multiple binary targets for different Lambda functions
 [[bin]]
 name = "sync_lambda"
 path = "src/sync_lambda/main.rs"
-
-[[bin]]
-name = "user_lambda"
-path = "src/user_lambda/main.rs"
-
-[[bin]]
-name = "auth_verify_lambda"
-path = "src/auth_verify_lambda/main.rs"
-
-[[bin]]
-name = "auth_user_info_lambda"
-path = "src/auth_user_info_lambda/main.rs"
 
 [dependencies]
 reqwest = { version = "0.12.22", features = ["rustls-tls"], default-features = false }
@@ -42,11 +29,8 @@ fitparser = "0.10.0"
 aws_lambda_events = { version = "0.17.0", default-features = false, features = ["eventbridge", "apigw"] }
 lambda_runtime = "0.14.3"
 aws-sdk-s3 = { version = "1.0", default-features = false, features = ["rustls"] }
-aws-sdk-secretsmanager = { version = "1.0", default-features = false, features = ["rustls"] }
 aws-sdk-dynamodb = { version = "1.0", default-features = false, features = ["rustls"] }
 serde_dynamo = { version = "4", features = ["aws-sdk-dynamodb+1"] }
-aws-sdk-kms = { version = "1.0", default-features = false, features = ["rustls"] }
-cloudfront_sign = "0.4.1"
 aws-config = { version = "1.0", default-features = false, features = ["rustls", "rt-tokio"] }
 function-timer = "0.9.2"
 metrics = "0.24.2"
@@ -62,12 +46,6 @@ uuid = { version = "1.0", features = ["v4", "serde"] }
 rand = "0.9"
 sha2 = "0.10"
 clerk-rs = "0.4.1"
-
-[build-dependencies]
-typify = "0.4"
-serde_yaml = "0.9"
-serde_json = "1.0"
-schemars = "0.8"
 
 [profile.release]
 lto = true

@@ -82,11 +82,7 @@ jobs:
         with:
           name: lambda-artifacts
           path: |
-            target/lambda/auth_user_info_lambda/bootstrap.zip
-            target/lambda/auth_verify_lambda/bootstrap.zip
-            target/lambda/user_lambda/bootstrap.zip
             target/lambda/sync_lambda/bootstrap.zip
-            openapi/ridelines-api.yaml
 
   publish:
     name: Publish Lambda Package
@@ -115,11 +111,7 @@ jobs:
         run: |
           cat > Dockerfile.lambda << 'EOF'
           FROM scratch
-          COPY artifacts/target/lambda/auth_user_info_lambda/bootstrap.zip /auth-user-info-lambda-package.zip
-          COPY artifacts/target/lambda/auth_verify_lambda/bootstrap.zip /auth-verify-lambda-package.zip
-          COPY artifacts/target/lambda/user_lambda/bootstrap.zip /user-lambda-package.zip
           COPY artifacts/target/lambda/sync_lambda/bootstrap.zip /sync-lambda-package.zip
-          COPY artifacts/openapi/ridelines-api.yaml /ridelines-api.yaml
           EOF
 
       - name: Log in to Container Registry
@@ -173,10 +165,7 @@ jobs:
 
           # Define lambdas with their descriptions
           declare -A lambdas=(
-            ["auth_user_info_lambda"]="User info for Clerk OAuth"
-            ["auth_verify_lambda"]="Custom authorizer"
-            ["user_lambda"]="Protected APIs"
-            ["sync_lambda"]="Activity processing"
+            ["sync_lambda"]="Activity download, conversion and tile generation"
           )
 
           # Loop through each lambda and add size info
