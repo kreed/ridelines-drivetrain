@@ -1,53 +1,36 @@
 # Ridelines Drivetrain
 
-A high-performance Rust AWS Lambda package for multi-user GPS activity processing from intervals.icu. The drivetrain provides three specialized Lambda functions: OAuth authentication, protected user APIs, and activity sync processing. Built for speed, security, and scalability with OAuth 2.0 integration.
-
-## Overview
-
-Ridelines Drivetrain is the backend powerhouse of the Ridelines ecosystem, built for speed, reliability, and efficiency. It handles the complete data processing pipeline from GPS activity ingestion to web-ready vector tiles, using Rust's performance advantages and AWS's serverless scale.
+Drivetrain is the backend powerhouse of [ridelines.xyz](https://ridelines.xyz). It's an async workflow that handles the complete data processing pipeline from GPS activity ingestion to web-ready vector tiles, using Rust's performance advantages and AWS's serverless scale.
 
 ### Key Features
 
-- **🔐 OAuth 2.0 Authentication**: Secure intervals.icu integration with JWT tokens
-- **👥 Multi-User Support**: User-specific activity processing and PMTiles
 - **🚀 High-Performance FIT Processing**: Convert Garmin FIT files to GeoJSON with gap detection
 - **🧠 Smart Synchronization**: Hash-based change detection for incremental updates
 - **🗺️ PMTiles Generation**: Create optimized vector tiles using Tippecanoe
-- **🛡️ Protected APIs**: JWT-secured endpoints via API Gateway
-- **☁️ AWS Native**: Three specialized Lambda functions with comprehensive monitoring
+- **👥 Multi-User Support**: User-specific activity processing and PMTiles
+- **☁️ AWS Native**: Serverless Lambda function with comprehensive monitoring
 - **🔄 Automatic Cache Management**: CloudFront invalidation for instant updates
 - **📊 4-Phase Sync Workflow**: Robust, resumable processing pipeline
+- **🔌 API Integration**: Direct Lambda invocation from chainring API backend
 
 ## Architecture
 
-### Lambda Functions
+### Lambda
 
-The drivetrain package provides three specialized Lambda functions:
-
-| Function | Binary | Purpose | Trigger |
-|----------|--------|---------|---------|
-| **auth-lambda** | `auth_lambda` | OAuth flow, JWT generation | API Gateway `/auth/*` |
-| **user-lambda** | `user_lambda` | Protected APIs, user profiles | API Gateway `/api/*` |
-| **sync-lambda** | `sync_lambda` | Activity download, PMTiles generation (async) | Direct invocation |
+Drivetrain runs as a single Lambda function. It's invoked by an SQS queue that receives messages from Chainring.
 
 ### System Architecture
 
 ```
 ┌─────────────────┐    ┌──────────────────┐    ┌─────────────────┐
-│   Frontend      │───▶│   API Gateway    │───▶│   auth-lambda   │
-│   (Hub)         │    │  (JWT Authorizer)│    │  (OAuth Flow)   │
+│   Frontend      │───▶│   Chainring      │───▶│   Drivetrain    │
+│   (Hub)         │    │  (tRPC API)      │    │ (FIT Processing)│
 └─────────────────┘    └──────────────────┘    └─────────────────┘
                                 │                        │
                                 ▼                        ▼
                        ┌──────────────────┐    ┌─────────────────┐
-                       │   user-lambda    │───▶│   sync-lambda   │
-                       │ (Protected APIs) │    │ (FIT Processing)│
-                       └──────────────────┘    └─────────────────┘
-                                │                        │
-                                ▼                        ▼
-                       ┌──────────────────┐    ┌─────────────────┐
                        │   DynamoDB       │    │   S3 + CDN      │
-                       │ (Users/State)    │    │  (PMTiles)      │
+                       │ (User Profiles)  │    │  (PMTiles)      │
                        └──────────────────┘    └─────────────────┘
 ```
 
@@ -70,21 +53,15 @@ The drivetrain package provides three specialized Lambda functions:
 - **Output**: Production-ready vector tiles for web mapping
 
 #### **intervals.icu Client** (`src/common/intervals_client.rs`)
-- **Purpose**: OAuth-enabled API integration with intervals.icu
-- **Features**: OAuth token handling, user profile fetching, activity API
-- **Security**: Access token validation, error handling
+- **Purpose**: API integration with intervals.icu
+- **Features**: Activity fetching with provided OAuth tokens
+- **Security**: Token validation, error handling
 
 ### Data Processing Flow
 
-#### OAuth Authentication Flow
-1. **🔐 Login**: User initiates OAuth with intervals.icu
-2. **🔑 Token Exchange**: Exchange authorization code for access token
-3. **👤 Profile**: Fetch user profile and athlete ID
-4. **🎫 JWT**: Generate signed JWT token for frontend
-
 #### Activity Sync Flow
-1. **📡 API Trigger**: User-lambda invokes sync-lambda with SyncRequest
-2. **📋 Activity List**: Fetch user activities using OAuth token
+1. **📡 API Trigger**: Chainring invokes sync-lambda with SyncRequest
+2. **📋 Activity List**: Fetch user activities using intervals.icu OAuth token
 3. **🔍 Change Detection**: Compare hashes to identify updates
 4. **📥 FIT Download**: Concurrent download of modified activities
 5. **🔄 GeoJSON Conversion**: Process FIT files with gap detection
@@ -136,26 +113,24 @@ The drivetrain package provides three specialized Lambda functions:
 
 | Command | Description |
 |---------|-------------|
-| `cargo build` | Build all Lambda functions for local development |
+| `cargo build` | Build sync Lambda for local development |
 | `cargo build --bin sync_lambda` | Build sync Lambda only |
-| `cargo build --bin auth_lambda` | Build auth Lambda only |
-| `cargo build --bin user_lambda` | Build user Lambda only |
 | `cargo test` | Run test suite |
 | `cargo clippy` | Run Rust linter |
 | `cargo fmt` | Format code |
-| `cargo lambda build --release` | Build all Lambda deployment packages |
+| `cargo lambda build --release` | Build Lambda deployment package |
 | `cargo lambda build --release --bin sync_lambda` | Build sync Lambda package |
 
 ### Local Development
 
 ```bash
-# Build all Lambda functions for Lambda environment
+# Build sync Lambda for Lambda environment
 cargo lambda build --release
 
-# Build specific Lambda function
-cargo lambda build --release --bin auth_lambda
+# Build sync Lambda specifically
+cargo lambda build --release --bin sync_lambda
 
-# Start local development server (sync lambda)
+# Start local development server
 cargo lambda watch --bin sync_lambda
 
 # Run tests with coverage
@@ -170,25 +145,8 @@ cargo fmt --check
 
 ### Environment Variables
 
-Each Lambda function uses these environment variables (configured via infrastructure):
+The sync Lambda uses these environment variables (configured via infrastructure):
 
-#### Auth Lambda
-```bash
-OAUTH_CREDENTIALS_SECRET_ARN=arn:aws:secretsmanager:region:account:secret:name
-JWT_KMS_KEY_ID=alias/ridelines-jwt
-USERS_TABLE_NAME=ridelines-users
-OAUTH_STATE_TABLE_NAME=ridelines-oauth-state
-FRONTEND_URL=https://ridelines.xyz
-```
-
-#### User Lambda
-```bash
-USERS_TABLE_NAME=ridelines-users
-JWT_KMS_KEY_ID=alias/ridelines-jwt
-SYNC_LAMBDA_FUNCTION_NAME=ridelines-sync-lambda
-```
-
-#### Sync Lambda
 ```bash
 S3_BUCKET=your-geojson-bucket
 CLOUDFRONT_DISTRIBUTION_ID=YOUR_DISTRIBUTION_ID
@@ -196,16 +154,9 @@ RUST_LOG=info                    # Logging level
 TIPPECANOE_ARGS="--drop-rate=0"  # Custom Tippecanoe settings
 ```
 
-### intervals.icu OAuth Setup
+### intervals.icu Integration
 
-1. **Register OAuth App**: Visit intervals.icu settings to create OAuth application
-2. **Store Credentials in Secrets Manager**:
-   ```bash
-   aws secretsmanager create-secret \
-     --name "ridelines-oauth-credentials" \
-     --description "OAuth credentials for intervals.icu integration" \
-     --secret-string '{"client_id":"your-client-id","client_secret":"your-client-secret"}'
-   ```
+The sync Lambda receives intervals.icu OAuth tokens from the chainring API, which handles all authentication flows. No direct OAuth setup is required in drivetrain.
 
 ## Project Structure
 
@@ -213,16 +164,12 @@ TIPPECANOE_ARGS="--drop-rate=0"  # Custom Tippecanoe settings
 drivetrain/
 ├── src/
 │   ├── lib.rs                     # Module declarations
-│   ├── common/                    # Shared modules for all Lambda functions
+│   ├── common/                    # Shared modules
 │   │   ├── aws.rs                # AWS client configurations
-│   │   ├── intervals_client.rs   # OAuth-enabled intervals.icu client
+│   │   ├── intervals_client.rs   # intervals.icu API client
 │   │   ├── metrics.rs            # CloudWatch metrics integration
 │   │   ├── models.rs             # Shared data models
 │   │   └── error.rs              # Common error types
-│   ├── auth_lambda/              # OAuth authentication Lambda
-│   │   └── main.rs               # OAuth login and callback handlers
-│   ├── user_lambda/              # Protected user API Lambda
-│   │   └── main.rs               # User profile and sync trigger APIs
 │   ├── sync_lambda/              # Activity processing Lambda
 │   │   ├── main.rs               # Lambda entry point
 │   │   ├── activity_sync/        # Core synchronization logic
@@ -233,7 +180,7 @@ drivetrain/
 │   │   ├── fit_converter.rs     # FIT to GeoJSON conversion
 │   │   └── tile_generator.rs    # PMTiles generation with Tippecanoe
 ├── tests/                        # Integration and unit tests
-├── Cargo.toml                   # Multiple binary targets and dependencies
+├── Cargo.toml                   # Single binary target and dependencies
 ├── Cargo.lock                   # Dependency lock file
 └── README.md                    # This file
 ```
@@ -353,8 +300,9 @@ CARGO_PROFILE_RELEASE_DEBUG=true cargo lambda build --release
 
 ## Links
 
-- [Infrastructure (Frame)](https://github.com/kreed/ridelines-frame/)
-- [Frontend (Hub)](https://github.com/kreed/ridelines-hub/)
+- **Frontend (Hub)**: [ridelines-hub](https://github.com/kreed/ridelines-hub)
+- **Backend API (Chainring)**: [ridelines-chainring](https://github.com/kreed/ridelines-chainring)
+- **Infrastructure (Frame)**: [ridelines-frame](https://github.com/kreed/ridelines-frame)
 - **intervals.icu API**: [Documentation](https://intervals.icu/api)
 - **PMTiles Specification**: [GitHub](https://github.com/protomaps/PMTiles)
 - **Tippecanoe**: [Tippecanoe](https://github.com/felt/tippecanoe)
