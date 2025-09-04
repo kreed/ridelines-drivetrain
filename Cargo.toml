@@ -26,7 +26,7 @@ tracing-subscriber = { version = "0.3", default-features = false, features = ["j
 geojson = "0.24"
 geo = "0.30.0"
 fitparser = "0.10.0"
-aws_lambda_events = { version = "0.17.0", default-features = false, features = ["eventbridge", "apigw"] }
+aws_lambda_events = { version = "0.17.0", default-features = false, features = ["eventbridge", "apigw", "sqs"] }
 lambda_runtime = "0.14.3"
 aws-sdk-s3 = { version = "1.0", default-features = false, features = ["rustls"] }
 aws-sdk-dynamodb = { version = "1.0", default-features = false, features = ["rustls"] }

@@ -1,3 +1,4 @@
+use aws_lambda_events::event::sqs::SqsEvent;
 use lambda_runtime::{Error, LambdaEvent};
 use metrics_cloudwatch_embedded::lambda::handler::run;
 use serde::{Deserialize, Serialize};
@@ -16,8 +17,10 @@ use clerk_rs::{ClerkConfiguration, clerk::Clerk};
 use ridelines_drivetrain::common::{intervals_client::IntervalsClient, metrics, types::User};
 
 #[derive(Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct SyncRequest {
     pub user_id: String,
+    pub timestamp: String,
 }
 
 mod activity_sync;
@@ -48,13 +51,34 @@ async fn main() -> Result<(), Error> {
 }
 
 #[time("lambda_handler_duration")]
-pub(crate) async fn function_handler(event: LambdaEvent<SyncRequest>) -> Result<(), Error> {
+pub(crate) async fn function_handler(event: LambdaEvent<SqsEvent>) -> Result<(), Error> {
     // Extract some useful information from the request
-    let (payload, _context) = event.into_parts();
-    tracing::info!("Sync request: {:?}", payload);
+    let (sqs_event, _context) = event.into_parts();
+    tracing::info!(
+        "Received SQS event with {} records",
+        sqs_event.records.len()
+    );
 
-    let user_id = &payload.user_id;
+    // Process each record (should only be 1 based on our batch_size configuration)
+    for record in sqs_event.records {
+        // Parse the message body to get the sync request
+        let body = record
+            .body
+            .as_ref()
+            .ok_or_else(|| Error::from("SQS message body is empty"))?;
+        let sync_request: SyncRequest = serde_json::from_str(body)
+            .map_err(|e| Error::from(format!("Failed to parse SQS message body: {e}")))?;
 
+        tracing::info!("Processing sync request for user: {}", sync_request.user_id);
+
+        // Process the sync for this user
+        process_user_sync(&sync_request.user_id).await?;
+    }
+
+    Ok(())
+}
+
+async fn process_user_sync(user_id: &str) -> Result<(), Error> {
     let s3_bucket =
         env::var("S3_BUCKET").map_err(|_| Error::from("S3_BUCKET environment variable not set"))?;
     let users_table = env::var("USERS_TABLE_NAME")
@@ -71,7 +95,7 @@ pub(crate) async fn function_handler(event: LambdaEvent<SyncRequest>) -> Result<
         .table_name(&users_table)
         .key(
             "id",
-            aws_sdk_dynamodb::types::AttributeValue::S(user_id.clone()),
+            aws_sdk_dynamodb::types::AttributeValue::S(user_id.to_string()),
         )
         .send()
         .await
