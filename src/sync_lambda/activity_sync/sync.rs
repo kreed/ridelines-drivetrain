@@ -5,7 +5,7 @@ use function_timer::time;
 use futures::stream::{self, StreamExt};
 use ridelines_drivetrain::common::intervals_client::Activity;
 use ridelines_drivetrain::common::metrics;
-use tracing::{error, info};
+use tracing::{debug, error, info};
 
 impl ActivitySync {
     #[time("sync_activities_duration")]
@@ -113,8 +113,8 @@ impl ActivitySync {
 
     async fn process_activity(&self, activity: Activity, temp_dir: &std::path::Path) -> Result<()> {
         info!(
-            "Processing activity: {} (ID: {})",
-            activity.name, activity.id
+            "Processing activity: {} ID: {} Date: {}",
+            activity.name, activity.id, activity.start_date_local
         );
 
         // Compute activity hash once
@@ -132,7 +132,7 @@ impl ActivitySync {
                     Ok(_) => {
                         metrics::increment_activities_with_gps(1);
                         metrics::increment_activities_downloaded_new(1);
-                        info!("Saved GeoJSON to: {}", temp_file_path.display());
+                        debug!("Saved GeoJSON to: {}", temp_file_path.display());
                     }
                     Err(e) => {
                         error!(
@@ -151,7 +151,7 @@ impl ActivitySync {
                 match std::fs::write(&stub_file_path, "") {
                     Ok(_) => {
                         metrics::increment_activities_without_gps(1);
-                        info!("Saved empty stub to: {}", stub_file_path.display());
+                        debug!("Saved empty stub to: {}", stub_file_path.display());
                     }
                     Err(e) => {
                         error!("Failed to write stub for activity {}: {}", activity.id, e);
