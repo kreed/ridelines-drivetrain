@@ -125,8 +125,8 @@ impl IntervalsClient {
         self.auth_header = Some(format!("Bearer {access_token}"));
     }
 
-    pub async fn fetch_activities(&self, athlete_id: &str) -> Result<Vec<Activity>> {
-        let path = format!("{ENDPOINT}/api/v1/athlete/{athlete_id}/activities.csv");
+    pub async fn fetch_activities(&self) -> Result<Vec<Activity>> {
+        let path = format!("{ENDPOINT}/api/v1/athlete/0/activities.csv");
 
         let auth_header = self
             .auth_header

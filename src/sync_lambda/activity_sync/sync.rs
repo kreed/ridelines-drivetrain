@@ -19,25 +19,22 @@ impl ActivitySync {
             }
         };
 
-        let activities = self
-            .intervals_client
-            .fetch_activities(&self.athlete_id)
-            .await?;
+        let activities = self.intervals_client.fetch_activities().await?;
         if activities.is_empty() {
-            info!("No activities found for athlete {}", self.athlete_id);
+            info!("No activities found for user {}", self.user_id);
             return Ok(None);
         }
 
         info!(
-            "Found {} activities for athlete {}",
+            "Found {} activities for user {}",
             activities.len(),
-            self.athlete_id
+            self.user_id
         );
 
         // Phase 2: Identify unchanged vs new/changed activities and create copied index
         let (copied_index, changed_activities, has_changes) =
             if let Some(ref existing) = existing_index {
-                let mut copied = ActivityIndex::new_empty(self.athlete_id.clone());
+                let mut copied = ActivityIndex::new_empty(self.user_id.clone());
                 let mut changed = Vec::new();
 
                 for activity in &activities {
@@ -73,7 +70,7 @@ impl ActivitySync {
                     "No existing index, processing all {} activities",
                     activities.len()
                 );
-                let empty_index = ActivityIndex::new_empty(self.athlete_id.clone());
+                let empty_index = ActivityIndex::new_empty(self.user_id.clone());
                 (empty_index, activities, true) // Always has changes when starting fresh
             };
 

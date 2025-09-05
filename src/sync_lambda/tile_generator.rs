@@ -10,18 +10,18 @@ use tracing::{error, info};
 
 pub struct TileGenerator {
     s3_client: S3Client,
-    athlete_id: String,
+    user_id: String,
     activities_bucket: String,
 }
 
 impl TileGenerator {
-    pub fn new(s3_client: S3Client, athlete_id: String) -> Result<Self> {
+    pub fn new(s3_client: S3Client, user_id: String) -> Result<Self> {
         let activities_bucket = env::var("ACTIVITIES_S3_BUCKET")
             .context("ACTIVITIES_S3_BUCKET environment variable not set")?;
 
         Ok(Self {
             s3_client,
-            athlete_id,
+            user_id,
             activities_bucket,
         })
     }
@@ -29,12 +29,12 @@ impl TileGenerator {
     #[time("generate_pmtiles_duration")]
     pub async fn generate_pmtiles_from_file(&self, geojson_file_path: &str) -> Result<()> {
         info!(
-            "Starting PMTiles generation for athlete {} from file: {}",
-            self.athlete_id, geojson_file_path
+            "Starting PMTiles generation for user {} from file: {}",
+            self.user_id, geojson_file_path
         );
 
         // Create temporary PMTiles file
-        let temp_pmtiles_file = format!("/tmp/{}.pmtiles", self.athlete_id);
+        let temp_pmtiles_file = format!("/tmp/{}.pmtiles", self.user_id);
 
         // Phase 1: Run tippecanoe directly on the provided GeoJSON file
         self.run_tippecanoe(geojson_file_path, &temp_pmtiles_file)
@@ -97,7 +97,7 @@ impl TileGenerator {
         metrics::record_pmtiles_file_size(file_content.len() as u64);
 
         // Upload to activities S3 bucket with new path structure
-        let s3_key = format!("activities/{}.pmtiles", self.athlete_id);
+        let s3_key = format!("activities/{}.pmtiles", self.user_id);
 
         match self
             .s3_client

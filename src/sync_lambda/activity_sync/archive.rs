@@ -23,7 +23,7 @@ impl ActivitySync {
         // Create temporary file for new GeoJSON content in work directory
         let temp_geojson_path = self
             .work_dir
-            .join(format!("activities_{}.geojson", self.athlete_id));
+            .join(format!("activities_{}.geojson", self.user_id));
         let temp_geojson_file = File::create(&temp_geojson_path)?;
         let mut geojson_writer = std::io::BufWriter::new(temp_geojson_file);
 
@@ -192,7 +192,7 @@ impl ActivitySync {
     /// Load existing activity index from S3 (returns the raw ActivityIndex)
     #[time("download_index_duration")]
     pub async fn download_index(&self) -> Result<ActivityIndex> {
-        let index_key = format!("athletes/{}/activities.index", self.athlete_id);
+        let index_key = format!("athletes/{}/activities.index", self.user_id);
 
         match self
             .s3_client
@@ -240,7 +240,7 @@ impl ActivitySync {
         metrics::record_index_size_bytes(serialized_data.len() as u64);
 
         // Upload to S3
-        let index_key = format!("athletes/{}/activities.index", index.athlete_id);
+        let index_key = format!("athletes/{}/activities.index", index.user_id);
         match self
             .s3_client
             .put_object()
@@ -267,7 +267,7 @@ impl ActivitySync {
     /// Download and decompress GeoJSON file from S3
     #[time("download_geojson_duration")]
     async fn download_geojson(&self) -> Result<String> {
-        let geojson_key = format!("athletes/{}/activities.geojson.zst", self.athlete_id);
+        let geojson_key = format!("athletes/{}/activities.geojson.zst", self.user_id);
 
         let response = self
             .s3_client
@@ -310,7 +310,7 @@ impl ActivitySync {
         );
 
         // Upload to S3
-        let geojson_key = format!("athletes/{}/activities.geojson.zst", self.athlete_id);
+        let geojson_key = format!("athletes/{}/activities.geojson.zst", self.user_id);
         self.s3_client
             .put_object()
             .bucket(&self.s3_bucket)

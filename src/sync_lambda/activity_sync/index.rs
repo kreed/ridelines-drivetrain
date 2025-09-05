@@ -4,7 +4,7 @@ use std::collections::HashSet;
 
 #[derive(Debug, Serialize, Deserialize, bincode::Encode, bincode::Decode)]
 pub struct ActivityIndex {
-    pub athlete_id: String,
+    pub user_id: String,
     pub last_updated: String,
     pub geojson_activities: HashSet<String>,
     pub empty_activities: HashSet<String>,
@@ -25,9 +25,9 @@ impl ActivityIndex {
         self.geojson_activities.len() + self.empty_activities.len()
     }
 
-    pub fn new_empty(athlete_id: String) -> Self {
+    pub fn new_empty(user_id: String) -> Self {
         Self {
-            athlete_id,
+            user_id,
             last_updated: chrono::Utc::now().to_rfc3339(),
             geojson_activities: HashSet::new(),
             empty_activities: HashSet::new(),

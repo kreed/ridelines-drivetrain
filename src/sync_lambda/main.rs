@@ -5,16 +5,14 @@ use serde::{Deserialize, Serialize};
 use tracing::info_span;
 
 use aws_config::BehaviorVersion;
-use aws_sdk_dynamodb::Client as DynamoDBClient;
 use aws_sdk_s3::Client as S3Client;
 use function_timer::time;
 use std::env;
 use tempdir::TempDir;
 
-use clerk_rs::apis::configuration::ApiKey;
 use clerk_rs::apis::users_api::User as ClerkUser;
 use clerk_rs::{ClerkConfiguration, clerk::Clerk};
-use ridelines_drivetrain::common::{intervals_client::IntervalsClient, metrics, types::User};
+use ridelines_drivetrain::common::{intervals_client::IntervalsClient, metrics};
 
 #[derive(Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -81,34 +79,13 @@ pub(crate) async fn function_handler(event: LambdaEvent<SqsEvent>) -> Result<(),
 async fn process_user_sync(user_id: &str) -> Result<(), Error> {
     let s3_bucket =
         env::var("S3_BUCKET").map_err(|_| Error::from("S3_BUCKET environment variable not set"))?;
-    let users_table = env::var("USERS_TABLE_NAME")
-        .map_err(|_| Error::from("USERS_TABLE_NAME environment variable not set"))?;
 
     // Initialize AWS SDK
     let config = aws_config::load_defaults(BehaviorVersion::latest()).await;
     let s3_client = S3Client::new(&config);
-    let dynamodb_client = DynamoDBClient::new(&config);
-
-    // Load user data and access token from DynamoDB
-    let user: User = dynamodb_client
-        .get_item()
-        .table_name(&users_table)
-        .key(
-            "id",
-            aws_sdk_dynamodb::types::AttributeValue::S(user_id.to_string()),
-        )
-        .send()
-        .await
-        .map_err(|e| Error::from(format!("Failed to get user from DynamoDB: {e}")))?
-        .item()
-        .ok_or_else(|| Error::from("User not found in DynamoDB"))
-        .and_then(|item| {
-            serde_dynamo::from_item(item.clone())
-                .map_err(|e| Error::from(format!("Failed to deserialize user: {e}")))
-        })?;
 
     // Create shared work directory for all temporary files
-    let work_dir = TempDir::new(&format!("intervals_mapper_{}", user.athlete_id))
+    let work_dir = TempDir::new(&format!("intervals_mapper_{}", user_id))
         .map_err(|e| Error::from(format!("Failed to create work directory: {e}")))?;
 
     // Get intervals.icu access token from Clerk
@@ -121,7 +98,7 @@ async fn process_user_sync(user_id: &str) -> Result<(), Error> {
     // Sync activities and get path to concatenated GeoJSON file
     let sync_job = ActivitySync::new(
         intervals_client,
-        &user.athlete_id,
+        user_id,
         s3_client.clone(),
         &s3_bucket,
         work_dir.path(),
@@ -142,7 +119,7 @@ async fn process_user_sync(user_id: &str) -> Result<(), Error> {
     };
 
     // Generate PMTiles from the concatenated GeoJSON file
-    let tile_generator = TileGenerator::new(s3_client, user.athlete_id.clone())
+    let tile_generator = TileGenerator::new(s3_client, user_id.to_string())
         .map_err(|e| Error::from(format!("Failed to create TileGenerator: {e}")))?;
 
     let tile_result = tile_generator
@@ -167,11 +144,7 @@ async fn get_intervals_access_token_from_clerk(user_id: &str) -> Result<String, 
     let clerk_secret_key = env::var("CLERK_SECRET_KEY")
         .map_err(|_| Error::from("CLERK_SECRET_KEY environment variable not set"))?;
 
-    let api_key = ApiKey {
-        prefix: None,
-        key: clerk_secret_key,
-    };
-    let config = ClerkConfiguration::new(None, None, None, Some(api_key));
+    let config = ClerkConfiguration::new(None, None, Some(clerk_secret_key), None);
     let clerk = Clerk::new(config);
 
     // Get OAuth access token for intervals.icu using Clerk API
