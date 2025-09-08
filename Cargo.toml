@@ -24,7 +24,7 @@ serde_json = "1.0.143"
 tracing = "0.1.41"
 tracing-subscriber = { version = "0.3", default-features = false, features = ["json", "env-filter", "fmt"] }
 geojson = "0.24"
-geo = "0.30.0"
+geo = "0.31.0"
 fitparser = "0.10.0"
 aws_lambda_events = { version = "0.18.0", default-features = false, features = ["eventbridge", "apigw", "sqs"] }
 lambda_runtime = "0.14.3"
