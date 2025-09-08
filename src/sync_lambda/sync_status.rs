@@ -45,10 +45,7 @@ impl SyncStatusUpdater {
     pub async fn initialize(&self) -> Result<()> {
         // Update existing record to set startedAt and initialize phases
         let updates = vec![
-            (
-                "status",
-                AttributeValue::S(serde_json::to_string(&SyncStatus::InProgress)?),
-            ),
+            ("status", AttributeValue::S("in_progress".to_string())),
             ("startedAt", AttributeValue::S(Utc::now().to_rfc3339())),
             (
                 "phases",
@@ -125,7 +122,7 @@ impl SyncStatusUpdater {
             let updates = vec![
                 (
                     "phases.analyzing.status",
-                    AttributeValue::S(serde_json::to_string(&PhaseStatus::Completed).unwrap()),
+                    AttributeValue::S("completed".to_string()),
                 ),
                 (
                     "phases.analyzing.totalActivities",
@@ -157,7 +154,7 @@ impl SyncStatusUpdater {
             let updates = vec![
                 (
                     "phases.downloading.status",
-                    AttributeValue::S(serde_json::to_string(&PhaseStatus::InProgress).unwrap()),
+                    AttributeValue::S("in_progress".to_string()),
                 ),
                 (
                     "phases.downloading.totalToProcess",
@@ -229,10 +226,7 @@ impl SyncStatusUpdater {
         let updater = self.clone();
         tokio::spawn(async move {
             let updates = vec![
-                (
-                    "status",
-                    AttributeValue::S(serde_json::to_string(&SyncStatus::Completed).unwrap()),
-                ),
+                ("status", AttributeValue::S("completed".to_string())),
                 ("completedAt", AttributeValue::S(Utc::now().to_rfc3339())),
             ];
 
@@ -251,10 +245,7 @@ impl SyncStatusUpdater {
         let error = error.to_string();
         tokio::spawn(async move {
             let updates = vec![
-                (
-                    "status",
-                    AttributeValue::S(serde_json::to_string(&SyncStatus::Failed).unwrap()),
-                ),
+                ("status", AttributeValue::S("failed".to_string())),
                 ("completedAt", AttributeValue::S(Utc::now().to_rfc3339())),
                 ("error", AttributeValue::S(error.clone())),
             ];
@@ -270,11 +261,14 @@ impl SyncStatusUpdater {
     }
 
     async fn update_phase_status(&self, phase: &str, status: PhaseStatus) -> Result<()> {
-        self.update_attribute(
-            &format!("phases.{}.status", phase),
-            &serde_json::to_string(&status)?,
-        )
-        .await
+        let status_str = match status {
+            PhaseStatus::Pending => "pending",
+            PhaseStatus::InProgress => "in_progress",
+            PhaseStatus::Completed => "completed",
+            PhaseStatus::Failed => "failed",
+        };
+        self.update_attribute(&format!("phases.{}.status", phase), status_str)
+            .await
     }
 
     async fn update_attribute(&self, path: &str, value: &str) -> Result<()> {
