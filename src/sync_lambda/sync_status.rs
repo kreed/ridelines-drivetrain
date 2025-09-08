@@ -26,66 +26,9 @@ pub enum PhaseStatus {
     Failed,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct AnalyzingPhase {
-    pub status: PhaseStatus,
-    pub message: Option<String>,
-    pub total_activities: Option<usize>,
-    pub unchanged_activities: Option<usize>,
-    pub changed_activities: Option<usize>,
-    pub error: Option<String>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct FailedActivity {
-    pub id: String,
-    pub name: String,
-    pub error: String,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct DownloadingPhase {
-    pub status: PhaseStatus,
-    pub total_to_process: usize,
-    pub processed: usize,
-    pub failed: usize,
-    pub failed_activities: Option<Vec<FailedActivity>>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct GeneratingPhase {
-    pub status: PhaseStatus,
-    pub message: Option<String>,
-    pub error: Option<String>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct Phases {
-    pub analyzing: AnalyzingPhase,
-    pub downloading: DownloadingPhase,
-    pub generating: GeneratingPhase,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct SyncStatusRecord {
-    #[serde(rename = "userId")]
-    pub user_id: String,
-    #[serde(rename = "syncId")]
-    pub sync_id: String,
-    pub status: SyncStatus,
-    #[serde(rename = "requestedAt")]
-    pub requested_at: Option<String>,
-    #[serde(rename = "startedAt")]
-    pub started_at: Option<String>,
-    #[serde(rename = "completedAt")]
-    pub completed_at: Option<String>,
-    pub error: Option<String>,
-    pub phases: Option<Phases>,
-}
-
 #[derive(Clone)]
 pub struct SyncStatusUpdater {
-    client: Client, // DynamoDB Client is cheap to clone (uses Arc internally)
+    client: Client,
     user_id: String,
     sync_id: String,
 }
