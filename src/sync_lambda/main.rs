@@ -18,15 +18,18 @@ use ridelines_drivetrain::common::{intervals_client::IntervalsClient, metrics};
 #[serde(rename_all = "camelCase")]
 pub struct SyncRequest {
     pub user_id: String,
+    pub sync_id: String,
     pub timestamp: String,
 }
 
 mod activity_sync;
 mod fit_converter;
+mod sync_status;
 mod tile_generator;
 
 use crate::activity_sync::ActivitySync;
 use crate::tile_generator::TileGenerator;
+use std::sync::Arc;
 
 #[tokio::main]
 async fn main() -> Result<(), Error> {
@@ -67,22 +70,38 @@ pub(crate) async fn function_handler(event: LambdaEvent<SqsEvent>) -> Result<(),
         let sync_request: SyncRequest = serde_json::from_str(body)
             .map_err(|e| Error::from(format!("Failed to parse SQS message body: {e}")))?;
 
-        tracing::info!("Processing sync request for user: {}", sync_request.user_id);
+        tracing::info!(
+            "Processing sync request for user: {} sync: {}",
+            sync_request.user_id,
+            sync_request.sync_id
+        );
 
         // Process the sync for this user
-        process_user_sync(&sync_request.user_id).await?;
+        process_user_sync(&sync_request.user_id, &sync_request.sync_id).await?;
     }
 
     Ok(())
 }
 
-async fn process_user_sync(user_id: &str) -> Result<(), Error> {
+async fn process_user_sync(user_id: &str, sync_id: &str) -> Result<(), Error> {
     let s3_bucket =
         env::var("S3_BUCKET").map_err(|_| Error::from("S3_BUCKET environment variable not set"))?;
 
     // Initialize AWS SDK
     let config = aws_config::load_defaults(BehaviorVersion::latest()).await;
     let s3_client = S3Client::new(&config);
+    let dynamodb_client = aws_sdk_dynamodb::Client::new(&config);
+
+    // Initialize sync status updater
+    let sync_status = Arc::new(sync_status::SyncStatusUpdater::new(
+        dynamodb_client,
+        user_id.to_string(),
+        sync_id.to_string(),
+    ));
+    sync_status
+        .initialize()
+        .await
+        .map_err(|e| Error::from(format!("Failed to initialize sync status: {e}")))?;
 
     // Create shared work directory for all temporary files
     let work_dir = TempDir::new(&format!("intervals_mapper_{}", user_id))
@@ -102,6 +121,7 @@ async fn process_user_sync(user_id: &str) -> Result<(), Error> {
         s3_client.clone(),
         &s3_bucket,
         work_dir.path(),
+        sync_status.clone(),
     );
 
     let geojson_file_path = match sync_job.sync_activities().await {
@@ -109,14 +129,19 @@ async fn process_user_sync(user_id: &str) -> Result<(), Error> {
         Ok(None) => {
             // No changes detected, skip tile generation
             tracing::info!("No activity changes detected, Lambda execution completed successfully");
+            sync_status.mark_completed();
             metrics::increment_lambda_success();
             return Ok(());
         }
         Err(e) => {
+            sync_status.mark_failed(&format!("Activity sync failed: {e}"));
             metrics::increment_lambda_failure();
             return Err(Error::from(format!("Sync failed: {e}")));
         }
     };
+
+    // Update status: start generating tiles
+    sync_status.start_generating();
 
     // Generate PMTiles from the concatenated GeoJSON file
     let tile_generator = TileGenerator::new(s3_client, user_id.to_string())
@@ -129,15 +154,23 @@ async fn process_user_sync(user_id: &str) -> Result<(), Error> {
     // Clean up the GeoJSON file regardless of tile generation success/failure
     let _ = std::fs::remove_file(&geojson_file_path);
 
-    if let Err(e) = tile_result {
-        tracing::error!("Failed to generate PMTiles: {}", e);
-        metrics::increment_lambda_failure();
-        return Err(Error::from(format!("PMTiles generation failed: {e}")));
-    }
+    match tile_result {
+        Ok(()) => {
+            // Update status: complete generating
+            sync_status.complete_generating();
+            sync_status.mark_completed();
 
-    // Record successful Lambda execution
-    metrics::increment_lambda_success();
-    Ok(())
+            // Record successful Lambda execution
+            metrics::increment_lambda_success();
+            Ok(())
+        }
+        Err(e) => {
+            tracing::error!("Failed to generate PMTiles: {}", e);
+            sync_status.mark_failed(&format!("PMTiles generation failed: {e}"));
+            metrics::increment_lambda_failure();
+            Err(Error::from(format!("PMTiles generation failed: {e}")))
+        }
+    }
 }
 
 async fn get_intervals_access_token_from_clerk(user_id: &str) -> Result<String, Error> {

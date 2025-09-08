@@ -10,6 +10,9 @@ use tracing::{debug, error, info};
 impl ActivitySync {
     #[time("sync_activities_duration")]
     pub async fn sync_activities(&self) -> Result<Option<std::path::PathBuf>> {
+        // Update status: starting analysis phase
+        self.sync_status.start_analyzing();
+
         // Phase 1: Load existing index (metadata only, not full archive)
         let existing_index = match self.download_index().await {
             Ok(index) => Some(index),
@@ -25,10 +28,10 @@ impl ActivitySync {
             return Ok(None);
         }
 
+        let total_activities = activities.len();
         info!(
             "Found {} activities for user {}",
-            activities.len(),
-            self.user_id
+            total_activities, self.user_id
         );
 
         // Phase 2: Identify unchanged vs new/changed activities and create copied index
@@ -68,11 +71,18 @@ impl ActivitySync {
                 // No existing index, all activities need processing
                 info!(
                     "No existing index, processing all {} activities",
-                    activities.len()
+                    total_activities
                 );
                 let empty_index = ActivityIndex::new_empty(self.user_id.clone());
                 (empty_index, activities, true) // Always has changes when starting fresh
             };
+
+        // Update status: analysis complete
+        self.sync_status.complete_analyzing(
+            total_activities,
+            copied_index.total_activities(),
+            changed_activities.len(),
+        );
 
         // Short circuit: if no changes detected, skip archive upload and tile generation
         if !has_changes {
@@ -80,17 +90,35 @@ impl ActivitySync {
             return Ok(None);
         }
 
+        // Update status: start downloading
+        self.sync_status.start_downloading(changed_activities.len());
+
         // Phase 3: Create subdirectory for changed activities and process them in parallel
         let changed_activities_dir = self.work_dir.join("activities");
         std::fs::create_dir_all(&changed_activities_dir)?;
 
         if !changed_activities.is_empty() {
-            stream::iter(changed_activities)
+            let total_to_process = changed_activities.len();
+            let mut processed = 0;
+
+            let results = stream::iter(changed_activities)
                 .map(|activity| self.process_activity(activity, &changed_activities_dir))
-                .buffer_unordered(5)
-                .collect::<Vec<_>>()
-                .await;
+                .buffer_unordered(5);
+
+            // Process results and update progress every 10 activities
+            tokio::pin!(results);
+            while let Some(_result) = results.next().await {
+                processed += 1;
+
+                // Update progress every 10 activities or when complete
+                if processed % 10 == 0 || processed == total_to_process {
+                    self.sync_status.update_download_progress(processed);
+                }
+            }
         }
+
+        // Update status: downloading complete
+        self.sync_status.complete_downloading();
 
         // Phase 4: Finalize archive by streaming existing + new activities from temp dir
         let geojson_file_path = self

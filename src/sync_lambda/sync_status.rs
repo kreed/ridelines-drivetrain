@@ -1,0 +1,381 @@
+use anyhow::Result;
+use aws_sdk_dynamodb::Client;
+use aws_sdk_dynamodb::types::AttributeValue;
+use chrono::Utc;
+use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
+use tracing::{error, info, warn};
+
+const TABLE_NAME: &str = "ridelines-sync-status";
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SyncStatus {
+    Queued,
+    InProgress,
+    Completed,
+    Failed,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum PhaseStatus {
+    Pending,
+    InProgress,
+    Completed,
+    Failed,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AnalyzingPhase {
+    pub status: PhaseStatus,
+    pub message: Option<String>,
+    pub total_activities: Option<usize>,
+    pub unchanged_activities: Option<usize>,
+    pub changed_activities: Option<usize>,
+    pub error: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct FailedActivity {
+    pub id: String,
+    pub name: String,
+    pub error: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DownloadingPhase {
+    pub status: PhaseStatus,
+    pub total_to_process: usize,
+    pub processed: usize,
+    pub failed: usize,
+    pub failed_activities: Option<Vec<FailedActivity>>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct GeneratingPhase {
+    pub status: PhaseStatus,
+    pub message: Option<String>,
+    pub error: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Phases {
+    pub analyzing: AnalyzingPhase,
+    pub downloading: DownloadingPhase,
+    pub generating: GeneratingPhase,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SyncStatusRecord {
+    #[serde(rename = "userId")]
+    pub user_id: String,
+    #[serde(rename = "syncId")]
+    pub sync_id: String,
+    pub status: SyncStatus,
+    #[serde(rename = "requestedAt")]
+    pub requested_at: Option<String>,
+    #[serde(rename = "startedAt")]
+    pub started_at: Option<String>,
+    #[serde(rename = "completedAt")]
+    pub completed_at: Option<String>,
+    pub error: Option<String>,
+    pub phases: Option<Phases>,
+}
+
+#[derive(Clone)]
+pub struct SyncStatusUpdater {
+    client: Client, // DynamoDB Client is cheap to clone (uses Arc internally)
+    user_id: String,
+    sync_id: String,
+}
+
+impl SyncStatusUpdater {
+    pub fn new(client: Client, user_id: String, sync_id: String) -> Self {
+        Self {
+            client,
+            user_id,
+            sync_id,
+        }
+    }
+
+    pub async fn initialize(&self) -> Result<()> {
+        // Update existing record to set startedAt and initialize phases
+        let updates = vec![
+            (
+                "status",
+                AttributeValue::S(serde_json::to_string(&SyncStatus::InProgress)?),
+            ),
+            ("startedAt", AttributeValue::S(Utc::now().to_rfc3339())),
+            (
+                "phases",
+                AttributeValue::M({
+                    let mut phases = HashMap::new();
+                    phases.insert(
+                        "analyzing".to_string(),
+                        AttributeValue::M({
+                            let mut phase = HashMap::new();
+                            phase.insert(
+                                "status".to_string(),
+                                AttributeValue::S("pending".to_string()),
+                            );
+                            phase
+                        }),
+                    );
+                    phases.insert(
+                        "downloading".to_string(),
+                        AttributeValue::M({
+                            let mut phase = HashMap::new();
+                            phase.insert(
+                                "status".to_string(),
+                                AttributeValue::S("pending".to_string()),
+                            );
+                            phase
+                        }),
+                    );
+                    phases.insert(
+                        "generating".to_string(),
+                        AttributeValue::M({
+                            let mut phase = HashMap::new();
+                            phase.insert(
+                                "status".to_string(),
+                                AttributeValue::S("pending".to_string()),
+                            );
+                            phase
+                        }),
+                    );
+                    phases
+                }),
+            ),
+        ];
+
+        self.batch_update(updates).await?;
+
+        info!(
+            "Initialized sync status for user {} sync {}",
+            self.user_id, self.sync_id
+        );
+        Ok(())
+    }
+
+    pub fn start_analyzing(&self) {
+        let updater = self.clone();
+        tokio::spawn(async move {
+            if let Err(e) = updater
+                .update_phase_status("analyzing", PhaseStatus::InProgress)
+                .await
+            {
+                warn!("Failed to update analyzing phase status: {}", e);
+            }
+            if let Err(e) = updater
+                .update_attribute("phases.analyzing.message", "Loading activity data...")
+                .await
+            {
+                warn!("Failed to update analyzing message: {}", e);
+            }
+        });
+    }
+
+    pub fn complete_analyzing(&self, total: usize, unchanged: usize, changed: usize) {
+        let updater = self.clone();
+        tokio::spawn(async move {
+            let updates = vec![
+                (
+                    "phases.analyzing.status",
+                    AttributeValue::S(serde_json::to_string(&PhaseStatus::Completed).unwrap()),
+                ),
+                (
+                    "phases.analyzing.totalActivities",
+                    AttributeValue::N(total.to_string()),
+                ),
+                (
+                    "phases.analyzing.unchangedActivities",
+                    AttributeValue::N(unchanged.to_string()),
+                ),
+                (
+                    "phases.analyzing.changedActivities",
+                    AttributeValue::N(changed.to_string()),
+                ),
+            ];
+
+            if let Err(e) = updater.batch_update(updates).await {
+                warn!("Failed to update analyzing completion: {}", e);
+            }
+            info!(
+                "Completed analyzing phase: {} total, {} unchanged, {} changed",
+                total, unchanged, changed
+            );
+        });
+    }
+
+    pub fn start_downloading(&self, total_to_process: usize) {
+        let updater = self.clone();
+        tokio::spawn(async move {
+            let updates = vec![
+                (
+                    "phases.downloading.status",
+                    AttributeValue::S(serde_json::to_string(&PhaseStatus::InProgress).unwrap()),
+                ),
+                (
+                    "phases.downloading.totalToProcess",
+                    AttributeValue::N(total_to_process.to_string()),
+                ),
+            ];
+
+            if let Err(e) = updater.batch_update(updates).await {
+                warn!("Failed to update downloading start: {}", e);
+            }
+        });
+    }
+
+    pub fn update_download_progress(&self, processed: usize) {
+        let updater = self.clone();
+        tokio::spawn(async move {
+            if let Err(e) = updater
+                .update_attribute("phases.downloading.processed", &processed.to_string())
+                .await
+            {
+                warn!("Failed to update download progress: {}", e);
+            }
+        });
+    }
+
+    pub fn complete_downloading(&self) {
+        let updater = self.clone();
+        tokio::spawn(async move {
+            if let Err(e) = updater
+                .update_phase_status("downloading", PhaseStatus::Completed)
+                .await
+            {
+                warn!("Failed to update downloading completion: {}", e);
+            }
+        });
+    }
+
+    pub fn start_generating(&self) {
+        let updater = self.clone();
+        tokio::spawn(async move {
+            if let Err(e) = updater
+                .update_phase_status("generating", PhaseStatus::InProgress)
+                .await
+            {
+                warn!("Failed to update generating phase status: {}", e);
+            }
+            if let Err(e) = updater
+                .update_attribute("phases.generating.message", "Generating map tiles...")
+                .await
+            {
+                warn!("Failed to update generating message: {}", e);
+            }
+        });
+    }
+
+    pub fn complete_generating(&self) {
+        let updater = self.clone();
+        tokio::spawn(async move {
+            if let Err(e) = updater
+                .update_phase_status("generating", PhaseStatus::Completed)
+                .await
+            {
+                warn!("Failed to update generating completion: {}", e);
+            }
+        });
+    }
+
+    pub fn mark_completed(&self) {
+        let updater = self.clone();
+        tokio::spawn(async move {
+            let updates = vec![
+                (
+                    "status",
+                    AttributeValue::S(serde_json::to_string(&SyncStatus::Completed).unwrap()),
+                ),
+                ("completedAt", AttributeValue::S(Utc::now().to_rfc3339())),
+            ];
+
+            if let Err(e) = updater.batch_update(updates).await {
+                warn!("Failed to mark sync as completed: {}", e);
+            }
+            info!(
+                "Sync completed for user {} sync {}",
+                updater.user_id, updater.sync_id
+            );
+        });
+    }
+
+    pub fn mark_failed(&self, error: &str) {
+        let updater = self.clone();
+        let error = error.to_string();
+        tokio::spawn(async move {
+            let updates = vec![
+                (
+                    "status",
+                    AttributeValue::S(serde_json::to_string(&SyncStatus::Failed).unwrap()),
+                ),
+                ("completedAt", AttributeValue::S(Utc::now().to_rfc3339())),
+                ("error", AttributeValue::S(error.clone())),
+            ];
+
+            if let Err(e) = updater.batch_update(updates).await {
+                warn!("Failed to mark sync as failed: {}", e);
+            }
+            error!(
+                "Sync failed for user {} sync {}: {}",
+                updater.user_id, updater.sync_id, error
+            );
+        });
+    }
+
+    async fn update_phase_status(&self, phase: &str, status: PhaseStatus) -> Result<()> {
+        self.update_attribute(
+            &format!("phases.{}.status", phase),
+            &serde_json::to_string(&status)?,
+        )
+        .await
+    }
+
+    async fn update_attribute(&self, path: &str, value: &str) -> Result<()> {
+        let update_expression = format!("SET {} = :val", path);
+
+        self.client
+            .update_item()
+            .table_name(TABLE_NAME)
+            .key("userId", AttributeValue::S(self.user_id.clone()))
+            .key("syncId", AttributeValue::S(self.sync_id.clone()))
+            .update_expression(update_expression)
+            .expression_attribute_values(":val", AttributeValue::S(value.to_string()))
+            .send()
+            .await?;
+
+        Ok(())
+    }
+
+    async fn batch_update(&self, updates: Vec<(&str, AttributeValue)>) -> Result<()> {
+        let mut update_expression = "SET ".to_string();
+        let mut expression_values = HashMap::new();
+
+        for (i, (path, value)) in updates.iter().enumerate() {
+            if i > 0 {
+                update_expression.push_str(", ");
+            }
+            let placeholder = format!(":val{}", i);
+            update_expression.push_str(&format!("{} = {}", path, placeholder));
+            expression_values.insert(placeholder, value.clone());
+        }
+
+        let mut request = self
+            .client
+            .update_item()
+            .table_name(TABLE_NAME)
+            .key("userId", AttributeValue::S(self.user_id.clone()))
+            .key("syncId", AttributeValue::S(self.sync_id.clone()))
+            .update_expression(update_expression);
+
+        for (key, value) in expression_values {
+            request = request.expression_attribute_values(key, value);
+        }
+
+        request.send().await?;
+        Ok(())
+    }
+}
