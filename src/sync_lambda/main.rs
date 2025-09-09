@@ -98,10 +98,7 @@ async fn process_user_sync(user_id: &str, sync_id: &str) -> Result<(), Error> {
         user_id.to_string(),
         sync_id.to_string(),
     ));
-    sync_status
-        .initialize()
-        .await
-        .map_err(|e| Error::from(format!("Failed to initialize sync status: {e}")))?;
+    sync_status.initialize().await?;
 
     // Create shared work directory for all temporary files
     let work_dir = TempDir::new(&format!("intervals_mapper_{}", user_id))
