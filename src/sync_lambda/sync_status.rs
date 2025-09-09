@@ -126,31 +126,33 @@ impl SyncStatusUpdater {
         self.spawn_update(|u| u.set("phases.generating.status", "completed"));
     }
 
-    pub fn mark_completed(&self) {
-        self.spawn_update(|u| {
-            u.set("status", "completed")
-                .set("completedAt", &Utc::now().to_rfc3339())
-        });
+    pub async fn mark_completed(&self) -> Result<()> {
+        let mut update = UpdateBuilder::new();
+        update
+            .set("status", "completed")
+            .set("completedAt", &Utc::now().to_rfc3339());
+
+        self.execute_update(update).await?;
         info!(
             "Sync completed for user {} sync {}",
             self.user_id, self.sync_id
         );
+        Ok(())
     }
 
-    pub fn mark_failed(&self, error: &str) {
-        let error = error.to_string();
-        let user_id = self.user_id.clone();
-        let sync_id = self.sync_id.clone();
-
+    pub async fn mark_failed(&self, error: &str) -> Result<()> {
         error!(
             "Sync failed for user {} sync {}: {}",
-            user_id, sync_id, error
+            self.user_id, self.sync_id, error
         );
-        self.spawn_update(move |u| {
-            u.set("status", "failed")
-                .set("completedAt", &Utc::now().to_rfc3339())
-                .set("error", &error)
-        });
+
+        let mut update = UpdateBuilder::new();
+        update
+            .set("status", "failed")
+            .set("completedAt", &Utc::now().to_rfc3339())
+            .set("error", error);
+
+        self.execute_update(update).await
     }
 
     fn spawn_update<F>(&self, f: F)

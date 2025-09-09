@@ -126,12 +126,14 @@ async fn process_user_sync(user_id: &str, sync_id: &str) -> Result<(), Error> {
         Ok(None) => {
             // No changes detected, skip tile generation
             tracing::info!("No activity changes detected, Lambda execution completed successfully");
-            sync_status.mark_completed();
+            sync_status.mark_completed().await?;
             metrics::increment_lambda_success();
             return Ok(());
         }
         Err(e) => {
-            sync_status.mark_failed(&format!("Activity sync failed: {e}"));
+            let _ = sync_status
+                .mark_failed(&format!("Activity sync failed: {e}"))
+                .await;
             metrics::increment_lambda_failure();
             return Err(Error::from(format!("Sync failed: {e}")));
         }
@@ -155,7 +157,7 @@ async fn process_user_sync(user_id: &str, sync_id: &str) -> Result<(), Error> {
         Ok(()) => {
             // Update status: complete generating
             sync_status.complete_generating();
-            sync_status.mark_completed();
+            sync_status.mark_completed().await?;
 
             // Record successful Lambda execution
             metrics::increment_lambda_success();
@@ -163,7 +165,9 @@ async fn process_user_sync(user_id: &str, sync_id: &str) -> Result<(), Error> {
         }
         Err(e) => {
             tracing::error!("Failed to generate PMTiles: {}", e);
-            sync_status.mark_failed(&format!("PMTiles generation failed: {e}"));
+            let _ = sync_status
+                .mark_failed(&format!("PMTiles generation failed: {e}"))
+                .await;
             metrics::increment_lambda_failure();
             Err(Error::from(format!("PMTiles generation failed: {e}")))
         }
