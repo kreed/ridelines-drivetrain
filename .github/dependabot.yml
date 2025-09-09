@@ -16,33 +16,10 @@ updates:
       prefix: "chore(deps)"
       include: "scope"
     groups:
-      # AWS and cloud services
-      aws-services:
+      # Group all Cargo dependencies together
+      cargo-dependencies:
         patterns:
-          - "aws-*"
-          - "lambda*"
-          - "serde_dynamo"
-        update-types:
-          - "minor"
-          - "patch"
-      # Core async and serialization
-      core-runtime:
-        patterns:
-          - "tokio*"
-          - "serde*"
-          - "futures"
-          - "reqwest*"
-          - "tracing*"
-        update-types:
-          - "minor"
-          - "patch"
-      # Domain-specific libraries
-      domain-libs:
-        patterns:
-          - "geo*"
-          - "fitparser*"
-          - "base64"
-          - "csv"
+          - "*"
         update-types:
           - "minor"
           - "patch"
@@ -66,6 +43,3 @@ updates:
       github-actions:
         patterns:
           - "*"
-        update-types:
-          - "minor"
-          - "patch"
