@@ -226,7 +226,7 @@ impl UpdateBuilder {
         let safe_path = path
             .split('.')
             .map(|part| match part {
-                "status" | "error" => {
+                "status" | "error" | "processed" => {
                     let placeholder = format!("#{}", part);
                     self.names.insert(placeholder.clone(), part.to_string());
                     placeholder
