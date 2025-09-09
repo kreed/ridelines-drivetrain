@@ -274,7 +274,8 @@ impl SyncStatusUpdater {
     async fn update_attribute(&self, path: &str, value: &str) -> Result<()> {
         let update_expression = format!("SET {} = :val", path);
 
-        self.client
+        match self
+            .client
             .update_item()
             .table_name(TABLE_NAME)
             .key("userId", AttributeValue::S(self.user_id.clone()))
@@ -282,9 +283,17 @@ impl SyncStatusUpdater {
             .update_expression(update_expression)
             .expression_attribute_values(":val", AttributeValue::S(value.to_string()))
             .send()
-            .await?;
-
-        Ok(())
+            .await
+        {
+            Ok(_) => Ok(()),
+            Err(e) => {
+                error!(
+                    "DynamoDB update_attribute failed for path '{}' with value '{}': {:?}",
+                    path, value, e
+                );
+                Err(anyhow::anyhow!("DynamoDB update failed: {}", e))
+            }
+        }
     }
 
     async fn batch_update(&self, updates: Vec<(&str, AttributeValue)>) -> Result<()> {
@@ -312,7 +321,15 @@ impl SyncStatusUpdater {
             request = request.expression_attribute_values(key, value);
         }
 
-        request.send().await?;
-        Ok(())
+        match request.send().await {
+            Ok(_) => Ok(()),
+            Err(e) => {
+                error!(
+                    "DynamoDB update failed for user {} sync {}: {:?}",
+                    self.user_id, self.sync_id, e
+                );
+                Err(anyhow::anyhow!("DynamoDB update failed: {}", e))
+            }
+        }
     }
 }
