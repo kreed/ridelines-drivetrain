@@ -12,7 +12,7 @@ name = "sync_lambda"
 path = "src/sync_lambda/main.rs"
 
 [dependencies]
-reqwest = { version = "0.12.24", features = ["rustls-tls"], default-features = false }
+reqwest = { version = "0.12.28", features = ["rustls-tls"], default-features = false }
 reqwest-retry = "0.7.0"
 reqwest-middleware = "0.4.2"
 tokio = { version = "1.48", features = ["rt-multi-thread", "macros", "net", "time", "fs"] }
@@ -20,8 +20,8 @@ futures = "0.3.31"
 base64 = "0.22.1"
 csv = "1.4.0"
 serde = { version = "1.0.228", features = ["derive"] }
-serde_json = "1.0.145"
-tracing = "0.1.43"
+serde_json = "1.0.148"
+tracing = "0.1.44"
 tracing-subscriber = { version = "0.3", default-features = false, features = ["json", "env-filter", "fmt"] }
 geojson = "0.24"
 geo = "0.31.0"
