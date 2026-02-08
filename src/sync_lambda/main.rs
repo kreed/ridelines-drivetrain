@@ -94,7 +94,7 @@ async fn process_user_sync(user_id: &str, sync_id: &str) -> Result<(), Error> {
 
     // Initialize sync status updater
     let sync_status = Arc::new(sync_status::SyncStatusUpdater::new(
-        dynamodb_client,
+        dynamodb_client.clone(),
         user_id.to_string(),
         sync_id.to_string(),
     ));
@@ -143,7 +143,7 @@ async fn process_user_sync(user_id: &str, sync_id: &str) -> Result<(), Error> {
     sync_status.start_generating();
 
     // Generate PMTiles from the concatenated GeoJSON file
-    let tile_generator = TileGenerator::new(s3_client, user_id.to_string())
+    let tile_generator = TileGenerator::new(s3_client, dynamodb_client, user_id.to_string())
         .map_err(|e| Error::from(format!("Failed to create TileGenerator: {e}")))?;
 
     let tile_result = tile_generator
