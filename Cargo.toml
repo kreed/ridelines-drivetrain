@@ -27,7 +27,7 @@ geojson = "0.24"
 geo = "0.32.0"
 fitparser = "0.10.0"
 aws_lambda_events = { version = "1.0.3", default-features = false, features = ["eventbridge", "apigw", "sqs"] }
-lambda_runtime = "0.14.4"
+lambda_runtime = "1.0.2"
 aws-sdk-s3 = { version = "1.107", default-features = false, features = ["rustls"] }
 aws-sdk-dynamodb = { version = "1.94", default-features = false, features = ["rustls"] }
 serde_dynamo = { version = "4", features = ["aws-sdk-dynamodb+1"] }
